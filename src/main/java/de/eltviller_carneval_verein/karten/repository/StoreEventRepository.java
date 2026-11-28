@@ -12,12 +12,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JavaType;
@@ -26,6 +28,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
+import de.eltviller_carneval_verein.karten.model.CashRegister;
+import de.eltviller_carneval_verein.karten.model.CashRegister.Kind;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -55,6 +59,16 @@ public class StoreEventRepository implements EventRepository {
 
 	/** Die Eigenschaftsnamen, die Jackson je Modellklasse kennt (siehe {@link #knownProperties}). */
 	private static final Map<Class<?>, Set<String>> KNOWN_PROPERTIES = new ConcurrentHashMap<>();
+
+	/**
+	 * Die Listen der Kind-Einheiten im Inhalt eines Modellobjekts: Sie gehören zu eigenen Einheiten, die Wege der
+	 * Konfliktaktionen ({@link #applyFields}, {@link #restoreFields}) lassen sie außen vor.
+	 */
+	private static final List<String> CHILD_LISTS = List.of(UnitMapper.PRESENTATIONS, UnitMapper.CASH_REGISTERS,
+			UnitMapper.BOOKINGS);
+
+	/** Der Hinweis, solange für ein Event „Kassen noch nicht abgeglichen" gilt ({@link #cashRegistersPending}). */
+	public static final String CASH_PENDING = "Die Kassen dieses Events werden noch abgeglichen.";
 
 	private static StoreEventRepository instance;
 
@@ -107,6 +121,9 @@ public class StoreEventRepository implements EventRepository {
 	 * den Cache, gilt das nicht mehr; das Wiederherstellen schreibt über {@link #write} und ist davon nicht betroffen.
 	 */
 	private final Set<String> removedByOthers = new HashSet<>();
+
+	/** Ob {@link #cashRegistersSettled} das Ende von „Kassen noch nicht abgeglichen" schon gemeldet hat. */
+	private boolean cashSettled;
 
 	/** Ob für das Modellobjekt einer Einheit gerade eine Eingabe offen ist (siehe {@link #setEditingCheck}). */
 	private Predicate<Object> inEditing = model -> false;
@@ -252,9 +269,18 @@ public class StoreEventRepository implements EventRepository {
 		}
 	}
 
+	/**
+	 * Ob der Vergleichsstand die Einheit lebend kennt: der Maßstab, an dem {@link UnitMapper#decompose} entscheidet, ob
+	 * eine Vorstellungskasse ohne eigene Daten eine Einheit des Events ist.
+	 */
+	private boolean liveInBaseline(UnitKey unit) {
+		UnitSnapshot known = baseline.known(unit);
+		return known != null && known.isLive();
+	}
+
 	/** Schreibt das Event, ohne zu prüfen, ob es das Objekt im Cache ist (das Wiederherstellen setzt den Cache selbst). */
 	private void write(Event event) {
-		baseline.save(event.getId(), event.getName(), UnitMapper.decompose(event));
+		baseline.save(event.getId(), event.getName(), UnitMapper.decompose(event, this::liveInBaseline));
 		forgetDerived(event.getId());
 
 		// Cache aktualisieren, falls das Event dort noch nicht enthalten ist
@@ -277,10 +303,14 @@ public class StoreEventRepository implements EventRepository {
 
 	/**
 	 * Die Speicherstände des Events (Kopf, Vorstellungen, Buchungen), neueste zuerst. Sie entstehen aus den Ketten im
-	 * Start-Index, ohne eine Versionsdatei zu lesen.
+	 * Start-Index, ohne eine Versionsdatei zu lesen. Die Ketten der Kassen zählen nicht (KARV-144): Das Wiederherstellen
+	 * setzt Kassen nicht zurück; ein Speichervorgang, der nur Kassen schrieb, erscheint nicht, und bei den anderen zählen
+	 * Kassen nicht in die Zahl der Änderungen.
 	 */
 	public List<SavePoint> savePoints(String eventId) throws IOException {
-		return RestorePlanner.savePoints(sync.chains(sync.eventUnits(eventId)).values());
+		List<UnitKey> units = sync.eventUnits(eventId).stream().filter(unit -> unit.type() != UnitType.CASH_REGISTER)
+				.toList();
+		return RestorePlanner.savePoints(sync.chains(units).values());
 	}
 
 	/**
@@ -294,9 +324,10 @@ public class StoreEventRepository implements EventRepository {
 	 * Scheitert das Speichern, bleibt im Cache der frisch gelesene Stand, passend zum Vergleichsstand. Wird das
 	 * Wiederherstellen abgelehnt, bleiben Cache und Vergleichsstand unberührt.
 	 *
-	 * @throws LockedUnitException wenn eine Einheit des Events gesperrt ist oder noch auf eine Datei wartet, wenn das Event
-	 *                             zu diesem Speicherstand gelöscht war oder der Zielstand unlesbare Teile enthält; es
-	 *                             wurde nichts gespeichert
+	 * @throws LockedUnitException wenn eine Einheit des Events gesperrt ist oder noch auf eine Datei wartet (außer einer
+	 *                             Kassen-Einheit: Kassen bleiben, wie sie sind), wenn das Event zu diesem Speicherstand
+	 *                             gelöscht war, der Zielstand unlesbare Teile enthält oder „Kassen noch nicht
+	 *                             abgeglichen" gilt; es wurde nichts gespeichert
 	 * @throws RuntimeException    wenn das Schreiben scheitert
 	 */
 	public Restored<Event> restoreEvent(String eventId, SavePoint point, Function<Event, List<String>> adjust)
@@ -310,9 +341,14 @@ public class StoreEventRepository implements EventRepository {
 	 * noch Vergleichsstand noch Listener und schreibt nichts. Den Änderungszähler des Vergleichsstands liest es zuerst, damit
 	 * {@link #commitRestore} jede Änderung seither bemerkt.
 	 *
-	 * @throws LockedUnitException wie {@link #restoreEvent}; es wurde nichts verändert
+	 * @throws LockedUnitException wie {@link #restoreEvent}, außerdem mit {@link #CASH_PENDING}, solange für das Event
+	 *                             „Kassen noch nicht abgeglichen" gilt (eine später eintreffende Kasse stünde sonst ohne
+	 *                             ihre Vorstellung da); es wurde nichts verändert
 	 */
 	public RestorePlan<Event> prepareRestoreEvent(String eventId, SavePoint point) throws IOException {
+		if (cashRegistersPending(eventId)) {
+			throw new LockedUnitException(CASH_PENDING);
+		}
 		long changes = baseline.changes(eventId);
 		List<UnitState> states = statesOf(eventId);
 		return new RestorePlan<>(eventId, states, targetOf(states, point), changes);
@@ -333,10 +369,38 @@ public class StoreEventRepository implements EventRepository {
 		ensureLoaded();
 		Event target = plan.target();
 		List<String> notes = adjust.apply(target);
-		refreshFromStore(plan.ownerId(), plan.states(), UnitMapper.payloads(target).keySet());
+		// Maßstab für eine Vorstellungskasse ohne eigene Daten ist der frisch gelesene Stand, der gleich Vergleichsstand wird
+		Set<UnitKey> live = plan.states().stream().map(UnitSnapshot::of).filter(UnitSnapshot::isLive)
+				.map(UnitSnapshot::unit).collect(Collectors.toSet());
+		refreshFromStore(plan.ownerId(), plan.states(), UnitMapper.payloads(target, live::contains).keySet());
 		write(target);
 		replaceCachedEvent(target);
 		return new Restored<>(target, notes);
+	}
+
+	/**
+	 * Die sichtbaren Kassen des Events, deren wirksamer Ist-Betrag heute von dem zum Speicherstand abweicht, mit dem
+	 * heutigen Betrag (KARV-144): Das Wiederherstellen setzt sie nicht zurück, die Rückfrage nennt sie. "Heute" ist der
+	 * frisch gelesene Stand der Einheiten, auch unter einem gelöschten Kopf (dann mit dem Kopf zum Speicherstand). Liest
+	 * die Einheiten des Events und gehört deshalb auf einen Hintergrund-Thread; berührt weder Cache noch Vergleichsstand.
+	 *
+	 * @return in der Reihenfolge der sichtbaren Kassen; leer, wenn nichts abweicht oder sich eines der beiden Events nicht
+	 *         zusammensetzen lässt (dann lehnt das Wiederherstellen ohnehin ab)
+	 */
+	public List<CountedCash> countedSince(String eventId, SavePoint point) throws IOException {
+		// die Kassen hängen nicht an Buchungen: nur Kopf, Vorstellungen und Kassen lesen und zusammensetzen
+		List<UnitState> states = statesOf(eventId, unit -> unit.type() != UnitType.BOOKING);
+		Map<UnitKey, UnitSnapshot> then = RestorePlanner.targetsAt(states, point.at());
+		Map<UnitKey, UnitSnapshot> today = new LinkedHashMap<>();
+		states.forEach(state -> today.put(state.unit(), UnitSnapshot.of(state)));
+		UnitKey head = UnitKey.event(eventId);
+		UnitSnapshot headToday = today.get(head);
+		if ((headToday == null || !UnitMapper.isReadable(headToday)) && then.containsKey(head)) {
+			today.put(head, then.get(head));
+		}
+		List<Event> now = UnitMapper.assembleEvents(today.values()).items();
+		List<Event> earlier = UnitMapper.assembleEvents(then.values()).items();
+		return now.isEmpty() || earlier.isEmpty() ? List.of() : CashRestore.countedSince(now.get(0), earlier.get(0));
 	}
 
 	/** Der Änderungszähler des Vergleichsstands des Events (nur für Tests). */
@@ -354,15 +418,20 @@ public class StoreEventRepository implements EventRepository {
 
 	/**
 	 * Der Zielstand des Events zum Speicherstand, nachdem {@link RestorePlanner#requireRestorable} die Einheiten gegen ihn
-	 * geprüft hat.
+	 * geprüft hat. Kassen bleiben, wie sie sind (KARV-144): Jede lesbare Kassen-Einheit steht mit ihrem heutigen Stand
+	 * darin ({@link CashRestore#keepCashRegisters}), und {@link CashRestore#adjust} gleicht alte Felder und entfallende
+	 * Vorstellungen an den heutigen Stand an.
 	 *
 	 * @throws LockedUnitException wie {@link #restoreEvent}
 	 */
 	private Event targetOf(List<UnitState> states, SavePoint point) {
-		Map<UnitKey, UnitSnapshot> targets = RestorePlanner.targetsAt(states, point.at());
+		Map<UnitKey, UnitSnapshot> targets = CashRestore.keepCashRegisters(states,
+				RestorePlanner.targetsAt(states, point.at()));
 		RestorePlanner.requireRestorable(states, targets);
-		return RestorePlanner.single(UnitMapper.assembleEvents(targets.values()),
+		Event target = RestorePlanner.single(UnitMapper.assembleEvents(targets.values()),
 				"Zu diesem Speicherstand war das Event gelöscht.");
+		CashRestore.adjust(target, states);
+		return target;
 	}
 
 	/**
@@ -413,9 +482,16 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	private List<UnitState> statesOf(String eventId) throws IOException {
+		return statesOf(eventId, unit -> true);
+	}
+
+	/** Wie {@link #statesOf(String)}, nur für die Einheiten, die {@code wanted} erfüllen. */
+	private List<UnitState> statesOf(String eventId, Predicate<UnitKey> wanted) throws IOException {
 		List<UnitState> states = new ArrayList<>();
 		for (UnitKey unit : sync.eventUnits(eventId)) {
-			states.add(sync.unitState(unit));
+			if (wanted.test(unit)) {
+				states.add(sync.unitState(unit));
+			}
 		}
 		return states;
 	}
@@ -462,7 +538,7 @@ public class StoreEventRepository implements EventRepository {
 	}
 
 	/**
-	 * Das Objekt im Modell zur Einheit (Event, Presentation oder Booking), sonst {@code null}. Bei einer Buchung auf einem
+	 * Das Objekt im Modell zur Einheit (Event, Presentation, CashRegister oder Booking), sonst {@code null}. Bei einer Buchung auf einem
 	 * Sitz ist es auch der leere Platzhalter, wenn der Sitz frei ist (siehe {@link Booking#hasData()}).
 	 */
 	public Object modelObject(UnitKey unit) {
@@ -497,7 +573,7 @@ public class StoreEventRepository implements EventRepository {
 	 */
 	public Map<UnitKey, ObjectNode> payloadsOf(String eventId) {
 		Event event = findEvent(eventId);
-		return event == null ? null : UnitMapper.payloads(event);
+		return event == null ? null : UnitMapper.payloads(event, this::liveInBaseline);
 	}
 
 	/**
@@ -518,8 +594,7 @@ public class StoreEventRepository implements EventRepository {
 	public void applyFields(UnitKey unit, ObjectNode fields) {
 		Object model = requireEventModel(unit);
 		ObjectNode merged = UnitMapper.normalize(model);
-		merged.remove(UnitMapper.PRESENTATIONS);
-		merged.remove(UnitMapper.BOOKINGS);
+		merged.remove(CHILD_LISTS);
 		Set<String> known = knownProperties(model.getClass());
 		fields.fields().forEachRemaining(field -> {
 			if (field.getValue().isNull() && !known.contains(field.getKey())) {
@@ -543,6 +618,7 @@ public class StoreEventRepository implements EventRepository {
 							lockedSeatIds(unit.eventId(), presentation));
 				}
 			}
+			case CASH_REGISTER -> ((CashRegister) model).copyFrom(MAPPER.treeToValue(merged, CashRegister.class));
 			case HALL -> throw new IllegalStateException("Eine Halle ist keine Einheit eines Events.");
 			}
 		} catch (JsonProcessingException e) {
@@ -563,6 +639,7 @@ public class StoreEventRepository implements EventRepository {
 		case BOOKING -> FieldGroups.booking();
 		case PRESENTATION -> FieldGroups.presentation();
 		case EVENT -> FieldGroups.eventHead();
+		case CASH_REGISTER -> FieldGroups.cashRegister();
 		case HALL -> throw new IllegalArgumentException("Eine Halle hat keine Feldgruppen im Event.");
 		};
 		ObjectNode fields = values.deepCopy();
@@ -587,7 +664,7 @@ public class StoreEventRepository implements EventRepository {
 		Object model = requireEventModel(unit);
 		ObjectNode fields = before.deepCopy();
 		UnitMapper.normalize(model).fieldNames().forEachRemaining(name -> {
-			if (!fields.has(name) && !UnitMapper.PRESENTATIONS.equals(name) && !UnitMapper.BOOKINGS.equals(name)) {
+			if (!fields.has(name) && !CHILD_LISTS.contains(name)) {
 				fields.putNull(name);
 			}
 		});
@@ -734,6 +811,140 @@ public class StoreEventRepository implements EventRepository {
 		requireEventRoot(presentationOrHead);
 		UnitMapper.requireNothingLockedBelow(presentationOrHead, name, sync.eventSnapshots(presentationOrHead.eventId()));
 	}
+
+	// Kassen (KARV-144) -->
+
+	/**
+	 * Die Kassen-Einheiten des Events, die sich nicht ändern lassen: gesperrt ({@link UnitMapper#lockOf}: beschädigt, neueres
+	 * Format oder inhaltlich zu neu, SYS-008 bzw. SYS-009) oder wartend auf eine Datei aus dem gemeinsamen Ordner; die
+	 * Event-Verwaltung behandelt eine wartende wie eine gesperrte. Gefragt wird wie bei {@link #lockedUnder} der Stand des
+	 * Versionsspeichers ({@link SyncService#cashRegisterSnapshots}, ohne Datei-Ein-/Ausgabe), nicht der Vergleichsstand:
+	 * So zählen auch Kassen, die im Modell fehlen.
+	 *
+	 * @return je Kennung der Kasse, nach Kennung geordnet; leer, wenn keine gesperrt ist oder wartet
+	 */
+	public Map<String, LockedCashRegister> lockedCashRegisters(String eventId) {
+		Map<String, LockedCashRegister> locked = new TreeMap<>();
+		for (UnitSnapshot state : sync.cashRegisterSnapshots(eventId).values()) {
+			UnitState.Status lock = UnitMapper.blockedStatus(state);
+			if (lock != null) {
+				String id = state.unit().cashRegisterId();
+				locked.put(id, new LockedCashRegister(id, lock, UnitMapper.isReadable(state)));
+			}
+		}
+		return locked;
+	}
+
+	/**
+	 * Ob für das Event „Kassen noch nicht abgeglichen" gilt (KARV-144): Ein gemeinsamer Ordner ist verbunden, auch wenn er
+	 * gerade nicht erreichbar ist; seit dem Programmstart lief noch kein Vollabgleich bis zum Ende
+	 * ({@link SyncService#fullSyncCompletedSinceStart}, im Einzelbetrieb nie); der Versionsspeicher kennt keine
+	 * Kassen-Einheit des Events, auch keine gelöschte; und der Kopf trägt das Merkmal der Kassen, ein gelöschter Kopf in
+	 * seinem letzten nicht gelöschten Stand. Dann können Kassen noch unterwegs sein, die dieser Rechner unter 1.1
+	 * übersprungen hat. Endet der Zustand mit dem Vollabgleich, meldet {@link #cashRegistersSettled} das.
+	 */
+	public boolean cashRegistersPending(String eventId) {
+		return !sync.fullSyncCompletedSinceStart() && !cashRegisterKnown(eventId) && headCarriesRequires(eventId);
+	}
+
+	/**
+	 * Ob der Versionsspeicher eine Kassen-Einheit des Events kennt: mit einer Version (auch einer Löschung) oder mit einem
+	 * Zustand, der auf eine wartet oder sie sperrt. Ein Ordner ohne Version mit Zustand {@code OK} ist keine.
+	 */
+	private boolean cashRegisterKnown(String eventId) {
+		return sync.cashRegisterSnapshots(eventId).values().stream()
+				.anyMatch(state -> state.version() != null || state.status() != UnitState.Status.OK);
+	}
+
+	/**
+	 * Ob der Kopf des Events im Versionsspeicher das Merkmal der Kassen trägt ({@link HeadRequires#carries}); bei einem
+	 * gelöschten Kopf sein letzter nicht gelöschter Stand. Nur dafür wird die Kette gelesen (selten: beim Wiederherstellen);
+	 * lässt sie sich nicht lesen, gilt das Merkmal als gesetzt (die vorsichtige Richtung).
+	 */
+	private boolean headCarriesRequires(String eventId) {
+		UnitKey head = UnitKey.event(eventId);
+		UnitSnapshot state = sync.snapshots(List.of(head)).get(head);
+		if (state == null || state.version() == null) {
+			return false;
+		}
+		if (!state.deleted()) {
+			return HeadRequires.carries(state.payload());
+		}
+		try {
+			Version last = sync.unitState(head).lastLive();
+			return last != null && HeadRequires.carries(last.payload());
+		} catch (IOException e) {
+			LOG.log(Level.WARNING, "Der letzte Stand von " + head.relativePath() + " ließ sich nicht lesen", e);
+			return true;
+		}
+	}
+
+	/**
+	 * Ob die Vorstellung im Versionsspeicher lebt, aber im Modell fehlt (gesperrt oder unlesbar): Eine verwaiste Kasse zeigt
+	 * dann „– (Vorstellung nicht verfügbar)" statt „– (Vorstellung gelöscht)". {@code false}, wenn die Vorstellung im Modell
+	 * steht, gelöscht ist (auch nur im Modell, noch nicht gespeichert) oder es sie nie gab.
+	 */
+	public boolean presentationUnavailable(String eventId, String presentationId) {
+		Event event = findEvent(eventId);
+		if (event != null && event.findPresentation(presentationId) != null) {
+			return false;
+		}
+		UnitKey unit = UnitKey.presentation(eventId, presentationId);
+		UnitSnapshot state = sync.snapshots(List.of(unit)).get(unit);
+		// lebt sie lesbar und ungesperrt im Versionsspeicher, hat der Nutzer sie nur im Modell gelöscht
+		return state != null && !UnitMapper.isAbsent(state)
+				&& (UnitMapper.blockedStatus(state) != null || !UnitMapper.isReadable(state));
+	}
+
+	/**
+	 * Lehnt ab, wenn die Kasse der Vorstellung gesperrt ist oder wartet ({@link #lockedCashRegisters}) oder für das Event
+	 * „Kassen noch nicht abgeglichen" gilt ({@link #cashRegistersPending}): Die Vorstellung zu löschen, nähme sonst einen
+	 * Ist-Betrag mit, den dieses Programm nicht sieht, oder eine später eintreffende Kasse stünde ohne ihre Vorstellung da.
+	 * Aufzurufen, bevor das Modell sich ändert.
+	 *
+	 * @param name wie die Meldung die Vorstellung nennt
+	 * @throws LockedUnitException bei einer Sperre mit {@link StoreMessages#lockedBelow} (wie
+	 *                             {@link #requireNothingLockedUnder}), sonst mit {@link #CASH_PENDING}
+	 */
+	public void requireCashRegisterWritable(String eventId, String presentationId, String name) {
+		LockedCashRegister locked = lockedCashRegisters(eventId).get(presentationId);
+		if (locked != null) {
+			throw new LockedUnitException(locked.deletionMessage(name));
+		}
+		if (cashRegistersPending(eventId)) {
+			throw new LockedUnitException(CASH_PENDING);
+		}
+	}
+
+	/**
+	 * Nach einem Vollabgleich (in der App über {@code LiveUpdates} bei {@code fullSyncCompleted}): Für jedes Event im Cache,
+	 * dessen Zustand „Kassen noch nicht abgeglichen" damit endete, ohne dass eine Kasse eintraf, kommt an die Listener eine
+	 * fremde Änderung am Kopf ({@link RepositoryListener#changingByOthers}, dann {@link RepositoryListener#changedByOthers}
+	 * ohne etwas nachzuspielen), damit offene Ansichten die Sperre aufheben. Das geschieht einmal im Programmlauf: Danach
+	 * kann der Zustand nicht wiederkehren. Vor dem ersten Vollabgleich geschieht nichts. Nur im JavaFX-Thread aufrufen.
+	 */
+	public void cashRegistersSettled() {
+		if (cashSettled || !sync.fullSyncCompletedSinceStart()) {
+			return;
+		}
+		cashSettled = true;
+		if (cachedEvents == null) {
+			return;
+		}
+		for (Event event : List.copyOf(cachedEvents)) {
+			try {
+				if (!cashRegisterKnown(event.getId()) && headCarriesRequires(event.getId())) {
+					listeners.notifyChangingByOthers(event);
+					listeners.notifyChangedByOthers(event, new ForeignBatch<>(Set.of(UnitKey.event(event.getId())), copy -> {
+					}));
+				}
+			} catch (RuntimeException e) {
+				LOG.log(Level.SEVERE, "Das Ende von \"Kassen noch nicht abgeglichen\" konnte nicht gemeldet werden: " + event, e);
+			}
+		}
+	}
+
+	// <-- Kassen
 
 	/**
 	 * Die Schlüssel der Buchungen mit Daten in der Vorstellung (was das Modell anzeigt), nach derselben Regel wie
@@ -929,7 +1140,7 @@ public class StoreEventRepository implements EventRepository {
 	private LocalChanges localChanges(Event event) {
 		Map<UnitKey, ObjectNode> model;
 		try {
-			model = UnitMapper.payloads(event);
+			model = UnitMapper.payloads(event, this::liveInBaseline);
 		} catch (IllegalStateException e) {
 			return new LocalChanges(Set.of(), true, null, Map.of(), Set.of());
 		}
@@ -1118,7 +1329,7 @@ public class StoreEventRepository implements EventRepository {
 	private void noteDerived(Event event, Map<UnitKey, ObjectNode> before, Set<UnitKey> skip, Set<UnitKey> resynced) {
 		Map<UnitKey, ObjectNode> after;
 		try {
-			after = UnitMapper.payloads(event);
+			after = UnitMapper.payloads(event, this::liveInBaseline);
 		} catch (IllegalStateException e) {
 			return;
 		}
@@ -1155,7 +1366,7 @@ public class StoreEventRepository implements EventRepository {
 		}
 		Map<UnitKey, ObjectNode> after;
 		try {
-			after = UnitMapper.payloads(event);
+			after = UnitMapper.payloads(event, this::liveInBaseline);
 		} catch (IllegalStateException e) {
 			return;
 		}
@@ -1492,13 +1703,24 @@ public class StoreEventRepository implements EventRepository {
 		return changes.movedCarriers(bookingId, unit).stream().anyMatch(carrier -> touchedByUser(event, changes, carrier));
 	}
 
-	/** Ob der Nutzer die Einheit ungespeichert geändert hat oder ihr Objekt im Modell gerade bearbeitet. */
+	/**
+	 * Ob der Nutzer die Einheit ungespeichert geändert hat oder ihr Objekt im Modell gerade bearbeitet. Eine
+	 * Vorstellungskasse gilt auch als bearbeitet, solange ihre Vorstellung es ist, mit oder ohne eigenes Objekt
+	 * (Kassenabgleich, KARV-144): Eine Eingabe dort holt die Kasse erst zum Ändern.
+	 */
 	private boolean touchedByUser(Event event, LocalChanges changes, UnitKey unit) {
 		if (changes.units().contains(unit)) {
 			return true;
 		}
 		Object model = EventMerge.modelObject(event, unit);
-		return model != null && inEditing.test(model);
+		if (model != null && inEditing.test(model)) {
+			return true;
+		}
+		if (unit.type() != UnitType.CASH_REGISTER || CashRegister.kindOf(unit.cashRegisterId()) != Kind.PRESENTATION) {
+			return false;
+		}
+		Presentation presentation = event.findPresentation(unit.cashRegisterId());
+		return presentation != null && inEditing.test(presentation);
 	}
 
 	/**
@@ -1840,6 +2062,7 @@ public class StoreEventRepository implements EventRepository {
 					Event rebuilt = MAPPER.readValue(state, Event.class);
 					copy.copyFrom(rebuilt);
 					copy.setPresentations(rebuilt.getPresentations());
+					copy.setCashRegisters(rebuilt.getCashRegisters());
 				} catch (IOException e) {
 					throw new UncheckedIOException(e);
 				}

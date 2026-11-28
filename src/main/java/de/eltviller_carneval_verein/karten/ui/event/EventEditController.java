@@ -63,6 +63,7 @@ import javafx.scene.control.ComboBox;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.RadioButton;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Spinner;
@@ -175,6 +176,23 @@ public class EventEditController {
 	// die Vorstellung, deren Tische die Tabelle Tisch zeigt (der gewählte Tisch bleibt nur innerhalb derselben Vorstellung)
 	private Presentation tablesOf;
 
+	// Kassen des gewählten Events (KARV-144), über CashRegisterTable
+	@FXML
+	private TableView<CashRegisterSection.Row> cashTable;
+	@FXML
+	private TableColumn<CashRegisterSection.Row, String> colCashName;
+	@FXML
+	private TableColumn<CashRegisterSection.Row, String> colCashScope;
+	@FXML
+	private RadioButton rbCashPerPresentation;
+	@FXML
+	private RadioButton rbCashShared;
+	@FXML
+	private Button btnAddCashRegister;
+	@FXML
+	private Label lblCashHint;
+	private CashRegisterTable cashRegisters;
+
 	// Halle, Bestuhlung und Standardpreis der gewählten Vorstellung
 	@FXML
 	private Label lblPresDetails;
@@ -253,11 +271,15 @@ public class EventEditController {
 
 	@FXML
 	public void initialize() {
+		// vor den Tabellen: Auswahl und Bearbeiten-Modus führen die Kassen mit
+		cashRegisters = new CashRegisterTable(repository, cashTable, colCashName, colCashScope, rbCashPerPresentation, rbCashShared,
+				btnAddCashRegister, lblCashHint, this::confirmEditing);
 		setupBookingTables();
 		setupCollums();
 		TableInput.install(eventTable);
 		TableInput.install(presTable);
 		TableInput.install(seatTable);
+		TableInput.install(cashTable);
 		setupPresentationDetails();
 		setupContextMenu();
 		DirtyIndicator.bind(btnSave, ChangeTracker.events());
@@ -275,7 +297,8 @@ public class EventEditController {
 		editing.watch(eventTable, event -> event);
 		editing.watch(presTable, presentation -> presentation);
 		editing.watch(seatTable, booking -> booking);
-		for (TableView<?> table : List.of(eventTable, presTable, seatTable)) {
+		editing.watch(cashTable, cashRegisters::modelOf);
+		for (TableView<?> table : List.of(eventTable, presTable, seatTable, cashTable)) {
 			table.editingCellProperty().addListener((obs, before, cell) -> {
 				if (cell == null) {
 					showPendingForeignChanges();
@@ -298,6 +321,7 @@ public class EventEditController {
 					editing.end(eventTable);
 					editing.end(presTable);
 					editing.end(seatTable);
+					editing.end(cashTable);
 					editing.end(spnPresPrice);
 					editing.end(dialogOwner);
 				}));
@@ -306,7 +330,7 @@ public class EventEditController {
 	/** Ob eine Eingabe oder Rückfrage offen ist, die ein Neuzeichnen der Tabellen und Felder wegrisse. */
 	private boolean inputOpen() {
 		return dialogOpen || eventTable.getEditingCell() != null || presTable.getEditingCell() != null || seatTable.getEditingCell() != null
-				|| spnPresPrice.getEditor().isFocused();
+				|| cashTable.getEditingCell() != null || spnPresPrice.getEditor().isFocused();
 	}
 
 	/**
@@ -362,6 +386,7 @@ public class EventEditController {
 		foreignChangePending = false;
 		String eventId = currentEvent == null ? null : currentEvent.getId();
 		String presentationId = currentPres == null ? null : currentPres.getId();
+		String cashRegisterId = cashRegisters.selectedId();
 		Item shownTable = tableTable.getSelectionModel().getSelectedItem();
 		String tableLabel = shownTable == null ? null : shownTable.label();
 		List<Booking> selectedSeats = new ArrayList<>(seatTable.getSelectionModel().getSelectedItems());
@@ -378,6 +403,8 @@ public class EventEditController {
 		eventTable.getSelectionModel().select(event);
 		Presentation presentation = event.findPresentation(presentationId);
 		refreshPresentationTable(event, presentation);
+		// das Abwählen oben hat die Kassen schon ohne Event gezeigt: die Auswahl über die Kennung zurückgeben
+		cashRegisters.select(cashRegisterId);
 
 		masterTableData.stream().filter(item -> item.label().equals(tableLabel)).findFirst().ifPresent(item -> tableTable.getSelectionModel().select(item));
 		selectedSeats.stream().filter(masterSeatData::contains).forEach(booking -> seatTable.getSelectionModel().select(booking));
@@ -431,7 +458,11 @@ public class EventEditController {
 		// --- Vorstellung Tabelle ---
 		colPresName.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getName()));
 		colPresName.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
-		colPresName.setOnEditCommit(e -> e.getRowValue().setName(e.getNewValue()));
+		colPresName.setOnEditCommit(e -> {
+			e.getRowValue().setName(e.getNewValue());
+			// der Vorgabename „Kasse <Name>" und „gilt für" folgen dem neuen Namen
+			Platform.runLater(() -> cashRegisters.show(currentEvent));
+		});
 
 		colPresDesc.setCellValueFactory(cell -> new SimpleStringProperty(cell.getValue().getDescription()));
 		colPresDesc.setCellFactory(ParsingTextFieldTableCell.forTextColumn());
@@ -1046,6 +1077,7 @@ public class EventEditController {
 			masterPresData.setAll(currentEvent.getPresentations());
 		}
 		setupAutoHeight(eventPerfHBox, eventTable, presTable, 10);
+		cashRegisters.show(currentEvent);
 		if (selectPresentation != null && masterPresData.contains(selectPresentation)) {
 			presTable.getSelectionModel().select(selectPresentation);
 		} else {
@@ -1092,6 +1124,7 @@ public class EventEditController {
 		eventTable.setEditable(editMode);
 		presTable.setEditable(editMode);
 		seatTable.setEditable(editMode);
+		cashRegisters.setEditMode(editMode);
 
 		if (btnSave != null) {
 			btnSave.setDisable(!editMode);

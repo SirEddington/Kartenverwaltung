@@ -31,6 +31,14 @@ class PresentationAndTableValidatorTest {
 		return presentation;
 	}
 
+	/** Das Event der Vorstellung aus {@link #presentation()}: Es hält sie als einzige Vorstellung. */
+	private static Event eventOf(Presentation presentation) {
+		Event event = new Event();
+		event.setName("Kampagne");
+		event.setPresentations(new java.util.ArrayList<>(java.util.List.of(presentation)));
+		return event;
+	}
+
 	/** Bestuhlung "Prunksitzung" in der Halle "Festhalle" mit einer Reihe ohne Buchstaben, noch ohne Tische. */
 	private static SeatingPlan plan() {
 		Hall hall = new Hall();
@@ -151,18 +159,20 @@ class PresentationAndTableValidatorTest {
 		for (int ok : new int[] { 0, 2500, 100_000_000 }) {
 			Presentation presentation = presentation();
 			presentation.setActualCashAmount(ok);
-			assertTrue(PresentationValidator.validate(presentation).isEmpty(), "Gültig: " + ok + " Cent");
+			assertTrue(CashRegisterValidator.validate(eventOf(presentation)).isEmpty(), "Gültig: " + ok + " Cent");
+			assertTrue(PresentationValidator.validate(presentation).isEmpty(), "Vorstellung prüft den Betrag nicht mehr: " + ok);
 		}
 
 		Presentation tooMuch = presentation();
 		tooMuch.setActualCashAmount(100_000_001);
-		ValidationIssue high = only(PresentationValidator.validate(tooMuch));
-		assertEquals("PRS-005", high.code());
-		assertEquals("Ist-Betrag von Vorstellung Prunksitzung liegt mit 1.000.000,01 € nicht zwischen 0,00 € und 1.000.000,00 €.", high.message());
+		assertTrue(PresentationValidator.validate(tooMuch).isEmpty(), "PRS-005 wird nicht mehr ausgegeben");
+		ValidationIssue high = only(CashRegisterValidator.validate(eventOf(tooMuch)));
+		assertEquals("KAS-004", high.code());
+		assertEquals("Ist-Betrag von Kasse \"Kasse Prunksitzung\" liegt mit 1.000.000,01 € nicht zwischen 0,00 € und 1.000.000,00 €.", high.message());
 
 		Presentation negative = presentation();
 		negative.setActualCashAmount(-1);
-		assertEquals("PRS-005", only(PresentationValidator.validate(negative)).code());
+		assertEquals("KAS-004", only(CashRegisterValidator.validate(eventOf(negative))).code());
 	}
 
 	// --- Weitergabe an die Kinder ---

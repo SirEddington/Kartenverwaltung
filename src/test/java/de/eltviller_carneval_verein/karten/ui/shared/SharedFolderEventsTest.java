@@ -58,9 +58,10 @@ class SharedFolderEventsTest {
 		events.error("SYS-012: Datei");
 		events.lost(unit, List.of(version), version);
 		events.pending(unit, version, "Kasse 2");
+		events.fullSyncCompleted();
 
 		assertEquals(List.of("unitsChanged:" + Set.of(unit), "conflictsChanged", "error:SYS-012: Datei",
-				"lost:" + unit, "pending:Kasse 2"), live);
+				"lost:" + unit, "pending:Kasse 2", "fullSyncCompleted"), live);
 		assertEquals(List.of(), ui);
 	}
 
@@ -481,6 +482,11 @@ class SharedFolderEventsTest {
 		@Override
 		public void pending(UnitKey unit, VersionId version, String machineName) {
 			live.add("pending:" + machineName);
+		}
+
+		@Override
+		public void fullSyncCompleted() {
+			live.add("fullSyncCompleted");
 		}
 	}
 

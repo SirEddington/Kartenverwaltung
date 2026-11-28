@@ -37,6 +37,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
+import de.eltviller_carneval_verein.karten.model.CashRegister;
+import de.eltviller_carneval_verein.karten.model.CashRegisters;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -323,6 +325,20 @@ class ConflictActionsTest {
 		Object owner = new Object();
 
 		b.editing.begin(owner, List.of(b.seat(4)));
+
+		assertEquals(new Availability(false, "Speichere oder verwirf zuerst deine offenen Änderungen."), actions.availability(row));
+		b.editing.end(owner);
+		assertTrue(actions.availability(row).enabled());
+	}
+
+	@Test
+	void actionsAreBlockedWhileCashRegisterIsInEditing() {
+		Row row = commentConflict();
+		ConflictActions actions = b.actions();
+		Object owner = new Object();
+		CashRegister register = CashRegisters.addFree(b.event);
+
+		b.editing.begin(owner, List.of(register));
 
 		assertEquals(new Availability(false, "Speichere oder verwirf zuerst deine offenen Änderungen."), actions.availability(row));
 		b.editing.end(owner);

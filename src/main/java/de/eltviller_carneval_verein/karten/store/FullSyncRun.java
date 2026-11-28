@@ -10,6 +10,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Der Plan eines Vollabgleichs in Stücken: Er teilt die Einheiten beider Bestände in Abschnitte und Blöcke und merkt
@@ -17,7 +19,8 @@ import java.util.Set;
  * das tut die {@link Work}, die der Aufrufer {@link #step} mitgibt.
  * <p>
  * Die Abschnitte, in dieser Reihenfolge: die Hallen in Bündeln zu {@link #HALL_BUNDLE}; dann je Event (sortiert) ein
- * Abschnitt "Kopf" mit nur der Event-Einheit und je Vorstellung (sortiert) ein Abschnitt "Vorstellung". Ein Abschnitt
+ * Abschnitt "Kopf" mit nur der Event-Einheit, je Vorstellung (sortiert) ein Abschnitt "Vorstellung" und, wenn es welche
+ * gibt, zuletzt ein Abschnitt "Kassen" mit den Kassen-Einheiten des Events. Ein Abschnitt
  * "Vorstellung" besteht aus Blöcken: der erste hat die Vorstellung und bis zu {@link #BOOKING_BLOCK} Buchungen, jeder
  * weitere bis zu {@link #BOOKING_BLOCK}. Die Buchungen werden bei jedem Block neu aufgelistet; ein Block nimmt die,
  * die größer sind als der Zeiger, den letzten bearbeiteten Buchungsordner. Was während des Laufs hinter dem Zeiger
@@ -26,6 +29,8 @@ import java.util.Set;
  * Nicht threadsicher; der Aufrufer hält dafür seine Arbeitssperre.
  */
 final class FullSyncRun {
+
+	private static final Logger LOGGER = Logger.getLogger(FullSyncRun.class.getName());
 
 	/** Wie viele Hallen ein Abschnitt zusammenfasst. */
 	static final int HALL_BUNDLE = 50;
@@ -140,6 +145,15 @@ final class FullSyncRun {
 				planned.addAll(presentationSections(event));
 			} catch (IOException | RuntimeException e) {
 				planned.add(Section.presentationsOf(event));
+			}
+			try {
+				List<UnitKey> cashRegisters = FullSync.childrenOfBoth(local, shared, event,
+						VersionStore.CASH_REGISTERS);
+				if (!cashRegisters.isEmpty()) {
+					planned.add(Section.of(cashRegisters));
+				}
+			} catch (IOException | RuntimeException e) {
+				LOGGER.log(Level.WARNING, "Die Kassen von Event " + eventId + " lassen sich nicht auflisten.", e);
 			}
 		}
 		sections = planned;

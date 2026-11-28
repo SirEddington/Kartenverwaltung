@@ -576,6 +576,34 @@ class FullSyncRunTest {
 	}
 
 	@Test
+	void fullSyncCopiesCashRegisters() throws IOException {
+		folder(local, "events/e1");
+		folder(shared, "events/e1/cashRegisters/_event");
+		Recorder work = new Recorder();
+
+		run.begin();
+		assertTrue(run.step(NEVER, work));
+
+		assertEquals(List.of(List.of(UnitKey.event("e1")), List.of(UnitKey.cashRegister("e1", "_event"))), work.calls);
+		assertEquals(Set.of(), run.skippedTrees());
+	}
+
+	@Test
+	void failingCashSectionDoesNotSkipEvent() throws IOException {
+		folder(local, "events/e1/presentations/p1");
+		AtomicBoolean broken = new AtomicBoolean(true);
+		breakSharedListing("events/e1/cashRegisters", broken);
+		Recorder work = new Recorder();
+
+		run.begin();
+		assertTrue(run.step(NEVER, work));
+
+		assertEquals(List.of(List.of(UnitKey.event("e1")), List.of(presentation("e1", "p1"))), work.calls);
+		assertEquals(Set.of(), run.skippedTrees());
+		assertEquals(List.of(), work.skips);
+	}
+
+	@Test
 	void progressCountsSections() throws IOException {
 		folder(local, "halls/h1");
 		folder(local, "events/e1/presentations/p1");

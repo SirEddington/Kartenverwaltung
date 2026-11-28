@@ -3,6 +3,7 @@ package de.eltviller_carneval_verein.karten.model;
 import java.util.Set;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
  * Das Feld {@code requires} oben in einer Einheit (Halle, Event, Vorstellung, Buchung): Eine neuere Programmversion nennt
@@ -14,8 +15,14 @@ public final class Requires {
 	/** Name des Feldes in der Datei. Reserviert; kein Modellfeld darf so heißen. */
 	public static final String KEY = "requires";
 
-	/** Die Merkmale, die diese Programmversion versteht. In Version 1.1 gibt es noch keine. */
-	public static final Set<String> KNOWN = Set.of();
+	/**
+	 * Das Merkmal am Event-Kopf, solange das Event Kassen-Einheiten hat (KARV-144): Version 1.1 kennt es nicht und sperrt
+	 * das Event, statt die Kassen zu übergehen.
+	 */
+	public static final String CASH_REGISTERS = "cashRegisters";
+
+	/** Die Merkmale, die diese Programmversion versteht. Version 1.1 kannte keine. */
+	public static final Set<String> KNOWN = Set.of(CASH_REGISTERS);
 
 	private Requires() {
 	}
@@ -38,5 +45,32 @@ public final class Requires {
 			}
 		}
 		return true;
+	}
+
+	/**
+	 * Ob dieser Wert von {@code requires} das Merkmal nennt: ein Array mit dem Text {@code feature}. Fehlend
+	 * ({@code null}), JSON-{@code null}, ein anderer Wert und {@code []} heißen nein.
+	 */
+	public static boolean contains(JsonNode value, String feature) {
+		if (value == null || !value.isArray()) {
+			return false;
+		}
+		for (JsonNode entry : value) {
+			if (feature.equals(entry.textValue())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Eine Kopie des Inhalts mit {@code "requires": [feature]} bzw. ohne das Feld. */
+	public static ObjectNode with(ObjectNode payload, String feature, boolean present) {
+		ObjectNode copy = payload.deepCopy();
+		if (present) {
+			copy.putArray(KEY).add(feature);
+		} else {
+			copy.remove(KEY);
+		}
+		return copy;
 	}
 }

@@ -41,6 +41,20 @@ final class FieldGroups {
 			group("description", "description"),
 			group("archived", "archived"));
 
+	/** Die Gruppe der Kasse mit Ist-Betrag und Kommentar; an ihr hängt die Ausnahme der {@link CashRegisterPolicy}. */
+	static final String CASH = "cash";
+	/** Das Feld des Ist-Betrags der Kasse (Gruppe {@link #CASH}). */
+	static final String CASH_AMOUNT = "actualCashAmount";
+	/** Das Feld des Kommentars der Kasse (Gruppe {@link #CASH}). */
+	static final String CASH_COMMENT = "cashDifferenceComment";
+
+	/** Ist-Betrag und Kommentar gehören zusammen wie bei der Vorstellung, ebenso die beiden Felder von "gilt für". */
+	private static final Map<String, List<String>> CASH_REGISTER = ordered(
+			group("name", "name"),
+			group("scope", "allPresentations", "presentationIds"),
+			group(CASH, CASH_AMOUNT, CASH_COMMENT),
+			group("id", "id"));
+
 	private FieldGroups() {
 	}
 
@@ -52,6 +66,11 @@ final class FieldGroups {
 	/** Die Feldgruppen einer Vorstellung (ohne ihre Buchungen). */
 	static Map<String, List<String>> presentation() {
 		return PRESENTATION;
+	}
+
+	/** Die Feldgruppen einer Kasse. */
+	static Map<String, List<String>> cashRegister() {
+		return CASH_REGISTER;
 	}
 
 	/** Die Feldgruppen eines Event-Kopfs, also des Events ohne seine Vorstellungen: jedes Feld eine Gruppe. */

@@ -133,6 +133,17 @@ class LiveViewsTest {
 	}
 
 	@Test
+	void cashRegisterTouchesEveryShownPresentationOfEvent() {
+		Event event = new Event("e1");
+
+		for (String id : List.of("_event", "_frei", "p1", "p2")) {
+			assertTrue(LiveViews.touches(Set.of(UnitKey.cashRegister("e1", id)), event, new Presentation("p1")), id);
+			assertTrue(LiveViews.touches(Set.of(UnitKey.cashRegister("e1", id)), event, null), id);
+		}
+		assertFalse(LiveViews.touches(Set.of(UnitKey.cashRegister("e2", "p1")), event, new Presentation("p1")));
+	}
+
+	@Test
 	void touchesWithoutPresentationMeansTheWholeEvent() {
 		Event event = new Event("e1");
 

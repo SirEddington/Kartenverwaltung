@@ -17,6 +17,8 @@ import java.util.function.Predicate;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
 import de.eltviller_carneval_verein.karten.model.BookingSync;
+import de.eltviller_carneval_verein.karten.model.CashRegister;
+import de.eltviller_carneval_verein.karten.model.CashRegisters;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -29,7 +31,7 @@ import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 
 /**
- * Arbeitet fremde Stände von Kopf, Vorstellungen und Buchungen in ein vorhandenes {@link Event} ein, so dass die Objekte
+ * Arbeitet fremde Stände von Kopf, Kassen, Vorstellungen und Buchungen in ein vorhandenes {@link Event} ein, so dass die Objekte
  * ihre Identität behalten (Spec KARV-85, "Einarbeiten"). Die Klasse ist zustandslos: Derselbe {@link Plan} führt das
  * Event im Cache und, über {@link ForeignBatch#replayOn}, eine Kopie für den Änderungsmelder nach. Was dabei übernommen
  * wurde, meldet sie einem {@link Sink}; Vergleichsstand und Listener kennt sie nicht.
@@ -266,13 +268,14 @@ final class EventMerge {
 		}
 	}
 
-	/** Die Reihenfolge des Einarbeitens: Kopf, Vorstellungen, Buchungen (wie beim Zerlegen). */
+	/** Die Reihenfolge des Einarbeitens: Kopf, Kassen und Vorstellungen, Buchungen (wie beim Zerlegen). */
 	static final Comparator<UnitSnapshot> MERGE_ORDER = Comparator.comparingInt(s -> rank(s.unit().type()));
 
 	private static int rank(UnitType type) {
 		return switch (type) {
 		case EVENT -> 0;
-		case PRESENTATION -> 1;
+		// eine Kasse hängt an keiner Vorstellung im Modell: Sie steht auf der Stufe der Vorstellungen, vor den Buchungen
+		case PRESENTATION, CASH_REGISTER -> 1;
 		case BOOKING -> 2;
 		case HALL -> throw new IllegalArgumentException("Eine Halle gehört zu keinem Event.");
 		};
@@ -288,6 +291,8 @@ final class EventMerge {
 	 * <li>Vorstellung geändert: Felder kopieren, bei anderer Halle oder Bestuhlung danach abgleichen. Neu oder
 	 * wiederbelebt: mit ihren sichtbaren Buchungen aus dem Index zusammensetzen, einsortieren wie beim Laden, abgleichen.
 	 * Gelöscht oder unlesbar: aus der Liste.</li>
+	 * <li>Kasse (KARV-144): Felder in das vorhandene Objekt kopieren, eine neue kommt in die Liste; gelöscht oder
+	 * unlesbar: aus der Liste.</li>
 	 * <li>Buchung auf einem Sitz: Ist sie {@linkplain #placeable platzierbar}, bekommt die Buchung, die dort steht (bei
 	 * freiem Sitz der leere Platzhalter), alle Felder, auch die Kennung. Steht dort keine, wird sie angehängt. Sonst bleibt
 	 * alles unberührt und sie wartet ({@link Sink#held}). Gelöscht oder unlesbar: nur die Kundendaten leeren, der
@@ -327,6 +332,7 @@ final class EventMerge {
 					}
 				}
 				case BOOKING -> mergeBooking(event, snapshot, plan, sink, undo);
+				case CASH_REGISTER -> mergeCashRegister(event, snapshot, sink);
 				case HALL -> throw new IllegalArgumentException("Eine Halle gehört zu keinem Event.");
 				}
 			} catch (RuntimeException e) {
@@ -344,6 +350,30 @@ final class EventMerge {
 			throw new IllegalArgumentException(snapshot.unit().relativePath() + " lässt sich nicht einarbeiten.");
 		}
 		event.copyFrom(state);
+		sink.adopted(snapshot, true);
+		warnIfLocked(snapshot, sink);
+	}
+
+	/**
+	 * Eine Kasse: Ein lesbarer Stand geht in das vorhandene Objekt ({@link CashRegister#copyFrom}) oder als neue Kasse in
+	 * die Liste; ein gelöschter oder unlesbarer nimmt sie aus der Liste. Für eine Vorstellungskasse gilt danach wieder der
+	 * Stand der alten Felder ihrer Vorstellung ({@link CashRegisters#effective}).
+	 */
+	private static void mergeCashRegister(Event event, UnitSnapshot snapshot, Sink sink) {
+		String id = snapshot.unit().cashRegisterId();
+		CashRegister state = UnitMapper.readUnit(snapshot, CashRegister.class);
+		if (state == null) {
+			event.removeCashRegister(id);
+			warnIfMissing(snapshot, UnitMapper.unreadableCashRegister(id, event.getName()), sink);
+			sink.adopted(snapshot, false);
+			return;
+		}
+		CashRegister existing = event.findCashRegister(id);
+		if (existing != null) {
+			existing.copyFrom(state);
+		} else {
+			event.putCashRegister(state);
+		}
 		sink.adopted(snapshot, true);
 		warnIfLocked(snapshot, sink);
 	}
@@ -835,16 +865,20 @@ final class EventMerge {
 	}
 
 	/**
-	 * Was das Einarbeiten einer Einheit am Modell ändern kann: Kopf, Liste der Vorstellungen und die betroffene Vorstellung
-	 * samt Buchungsliste und den Feldern der Buchungen, die es ändern kann (bei einer Vorstellung alle, die der Abgleich
-	 * anfasst, bei einer Buchung die auf ihrem Platz). Scheitert es mittendrin, stellt {@link #restore} das wieder her:
-	 * Ein halb übernommener fremder Stand gälte sonst als Änderung des Nutzers, und das nächste Speichern schriebe ihn.
+	 * Was das Einarbeiten einer Einheit am Modell ändern kann: Kopf, Liste der Vorstellungen, bei Kopf und Kasse die Liste
+	 * der Kassen samt den Feldern jeder Kasse, sonst die betroffene Vorstellung samt Buchungsliste und den Feldern der
+	 * Buchungen, die es ändern kann (bei einer Vorstellung alle, die der Abgleich anfasst, bei einer Buchung die auf ihrem
+	 * Platz). Scheitert es
+	 * mittendrin, stellt {@link #restore} das wieder her: Ein halb übernommener fremder Stand gälte sonst als Änderung des
+	 * Nutzers, und das nächste Speichern schriebe ihn.
 	 */
 	private static final class Undo {
 
 		private final Event event;
 		private final Event head;
 		private final List<Presentation> presentations;
+		private final List<CashRegister> cashRegisters;
+		private final Map<CashRegister, CashRegister> cashStates = new IdentityHashMap<>();
 		private final Presentation presentation;
 		private final Presentation fields;
 		private final boolean planMissing;
@@ -857,7 +891,17 @@ final class EventMerge {
 			head = new Event(event.getId());
 			head.copyFrom(event);
 			presentations = event.getPresentations() == null ? null : new ArrayList<>(event.getPresentations());
-			presentation = unit.type() == UnitType.EVENT ? null : presentation(event, unit.presentationId());
+			boolean atEvent = unit.type() == UnitType.EVENT || unit.type() == UnitType.CASH_REGISTER;
+			// nur Kopf und Kasse fassen die Kassen an; Vorstellung und Buchung lassen sie stehen
+			cashRegisters = atEvent ? new ArrayList<>(event.getCashRegisters()) : null;
+			if (atEvent) {
+				for (CashRegister register : cashRegisters) {
+					CashRegister fields = new CashRegister(register.getId());
+					fields.copyFrom(register);
+					cashStates.put(register, fields);
+				}
+			}
+			presentation = atEvent ? null : presentation(event, unit.presentationId());
 			if (presentation == null) {
 				fields = null;
 				planMissing = false;
@@ -897,6 +941,11 @@ final class EventMerge {
 				event.getPresentations().addAll(presentations);
 			} else {
 				event.setPresentations(presentations == null ? null : new ArrayList<>(presentations));
+			}
+			if (cashRegisters != null) {
+				event.getCashRegisters().clear();
+				event.getCashRegisters().addAll(cashRegisters);
+				cashStates.forEach(CashRegister::copyFrom);
 			}
 			if (presentation == null) {
 				return;
@@ -952,11 +1001,12 @@ final class EventMerge {
 		return found;
 	}
 
-	/** Das Objekt im Modell, das zur Einheit gehört (Event, Presentation oder Booking), sonst {@code null}. */
+	/** Das Objekt im Modell, das zur Einheit gehört (Event, Presentation, CashRegister oder Booking), sonst {@code null}. */
 	static Object modelObject(Event event, UnitKey unit) {
 		return switch (unit.type()) {
 		case EVENT -> event;
 		case PRESENTATION -> presentation(event, unit.presentationId());
+		case CASH_REGISTER -> event.findCashRegister(unit.cashRegisterId());
 		case BOOKING -> {
 			Presentation presentation = presentation(event, unit.presentationId());
 			yield presentation == null ? null : bookingAt(presentation, unit);
@@ -994,26 +1044,33 @@ final class EventMerge {
 			Presentation state = UnitMapper.readUnit(snapshot, Presentation.class);
 			yield existing != null && (state == null || changesPlan(existing, state));
 		}
-		case BOOKING, HALL -> false;
+		case BOOKING, HALL, CASH_REGISTER -> false;
 		};
 	}
 
-	/** Ob die Einheit {@code root} ist oder darunter liegt (unter einem Kopf: alles des Events). */
+	/**
+	 * Ob die Einheit {@code root} ist oder darunter liegt (unter einem Kopf: alles des Events, auch die Kassen; unter einer
+	 * Vorstellung ihre Buchungen, nicht ihre Kasse: Die hängt am Event).
+	 */
 	static boolean inSubtree(UnitKey unit, UnitKey root) {
 		return switch (root.type()) {
 		case EVENT -> unit.type() != UnitType.HALL && root.eventId().equals(unit.eventId());
-		case PRESENTATION -> unit.type() != UnitType.HALL && unit.type() != UnitType.EVENT
+		case PRESENTATION -> (unit.type() == UnitType.PRESENTATION || unit.type() == UnitType.BOOKING)
 				&& root.eventId().equals(unit.eventId()) && root.presentationId().equals(unit.presentationId());
-		case BOOKING, HALL -> root.equals(unit);
+		case BOOKING, HALL, CASH_REGISTER -> root.equals(unit);
 		};
 	}
 
-	/** Die Objekte im Modell zur Einheit und darunter (Kopf: Event, Vorstellungen, Buchungen; Vorstellung: sie und ihre Buchungen). */
+	/**
+	 * Die Objekte im Modell zur Einheit und darunter (Kopf: Event, Kassen, Vorstellungen, Buchungen; Vorstellung: sie und
+	 * ihre Buchungen; Kasse oder Buchung: sie selbst).
+	 */
 	static List<Object> subtree(Event event, UnitKey root) {
 		List<Object> objects = new ArrayList<>();
 		switch (root.type()) {
 		case EVENT -> {
 			objects.add(event);
+			objects.addAll(event.getCashRegisters());
 			for (Presentation presentation : event.getPresentations() != null ? event.getPresentations()
 					: List.<Presentation>of()) {
 				addWithBookings(objects, presentation);
@@ -1025,7 +1082,7 @@ final class EventMerge {
 				addWithBookings(objects, presentation);
 			}
 		}
-		case BOOKING, HALL -> {
+		case BOOKING, CASH_REGISTER, HALL -> {
 			Object model = modelObject(event, root);
 			if (model != null) {
 				objects.add(model);

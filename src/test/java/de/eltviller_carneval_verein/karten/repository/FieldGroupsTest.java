@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.CashRegister;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.PaymentStatus;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -74,13 +75,43 @@ class FieldGroupsTest {
 		return presentation;
 	}
 
+	private static CashRegister fullCashRegister() {
+		CashRegister register = new CashRegister(CashRegister.newFreeId());
+		register.setName("Bar");
+		register.setAllPresentations(true);
+		register.setPresentationIds(new ArrayList<>(List.of("pres-1")));
+		register.setActualCashAmount(5000);
+		register.setCashDifferenceComment("Wechselgeld");
+		return register;
+	}
+
 	private static Event fullEvent() {
 		Event event = new Event();
 		event.setName("Session");
 		event.setDescription("Beschreibung");
 		event.setArchived(true);
 		event.setPresentations(new ArrayList<>(List.of(fullPresentation())));
+		event.putCashRegister(fullCashRegister());
 		return event;
+	}
+
+	/** Der Kopf, wie {@link UnitMapper#decompose} ihn schreibt: das Event ohne Vorstellungen und Kassen. */
+	private static ObjectNode head(Event event) {
+		return UnitMapper.decompose(event, unit -> false).get(0).payload();
+	}
+
+	private static ObjectNode head() {
+		return head(fullEvent());
+	}
+
+	@Test
+	void headIsTheEventWithoutPresentationsAndCashRegisters() {
+		Event event = fullEvent();
+		ObjectNode expected = UnitMapper.normalize(event);
+		expected.remove("presentations");
+		expected.remove("cashRegisters");
+
+		assertEquals(expected, head(event));
 	}
 
 	@Test
@@ -104,11 +135,15 @@ class FieldGroupsTest {
 
 	@Test
 	void everyStoredEventHeadFieldBelongsToAGroup() {
-		ObjectNode stored = UnitMapper.normalize(fullEvent());
-		stored.remove("presentations");
-
-		Set<String> missing = new HashSet<>(names(stored));
+		Set<String> missing = new HashSet<>(names(head()));
 		missing.removeAll(grouped(FieldGroups.eventHead()));
+		assertTrue(missing.isEmpty(), "Felder ohne Gruppe: " + missing);
+	}
+
+	@Test
+	void everyStoredCashRegisterFieldBelongsToAGroup() {
+		Set<String> missing = new HashSet<>(names(UnitMapper.normalize(fullCashRegister())));
+		missing.removeAll(grouped(FieldGroups.cashRegister()));
 		assertTrue(missing.isEmpty(), "Felder ohne Gruppe: " + missing);
 	}
 
@@ -116,18 +151,17 @@ class FieldGroupsTest {
 	void everyGroupFieldIsStored() {
 		ObjectNode presentation = UnitMapper.normalize(fullPresentation());
 		presentation.remove("bookings");
-		ObjectNode head = UnitMapper.normalize(fullEvent());
-		head.remove("presentations");
 
 		assertEquals(names(UnitMapper.normalize(fullBooking())), grouped(FieldGroups.booking()));
 		assertEquals(names(presentation), grouped(FieldGroups.presentation()));
-		assertEquals(names(head), grouped(FieldGroups.eventHead()));
+		assertEquals(names(head()), grouped(FieldGroups.eventHead()));
+		assertEquals(names(UnitMapper.normalize(fullCashRegister())), grouped(FieldGroups.cashRegister()));
 	}
 
 	@Test
 	void noFieldBelongsToTwoGroups() {
 		for (Map<String, List<String>> groups : List.of(FieldGroups.booking(), FieldGroups.presentation(),
-				FieldGroups.eventHead())) {
+				FieldGroups.eventHead(), FieldGroups.cashRegister())) {
 			Collection<List<String>> lists = groups.values();
 			int total = lists.stream().mapToInt(List::size).sum();
 			assertEquals(total, grouped(groups).size(), "Ein Feld steht in zwei Gruppen: " + groups);

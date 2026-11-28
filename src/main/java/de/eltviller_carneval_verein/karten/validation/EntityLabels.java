@@ -2,6 +2,7 @@ package de.eltviller_carneval_verein.karten.validation;
 
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.CashRegisters;
 import de.eltviller_carneval_verein.karten.model.HallObject;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 import de.eltviller_carneval_verein.karten.model.Seat;
@@ -20,7 +21,7 @@ public final class EntityLabels {
 	}
 
 	/** Platzhalter für einen leeren Namen in Anzeigen (Listen, Auswahlfelder). */
-	public static final String NAME_PLACEHOLDER = "(ohne Name)";
+	public static final String NAME_PLACEHOLDER = CashRegisters.NAME_PLACEHOLDER;
 
 	/** Bezeichnung der Buchungen, die keinen Platz in der Bestuhlung haben (Tabelle, Baum, Meldungen). */
 	public static final String UNASSIGNED_TEXT = "Ohne Platz";
@@ -56,6 +57,16 @@ public final class EntityLabels {
 	/** z. B. "Vorstellung Prunksitzung" (ohne Namen: "Vorstellung ohne Namen"). */
 	public static String presentation(Presentation presentation) {
 		return named("Vorstellung", presentation.getName());
+	}
+
+	/**
+	 * z. B. {@code Kasse "Gemeinsame Kasse"} (KARV-144); der Anzeigename steht in Anführungszeichen, weil er selbst mit
+	 * "Kasse" beginnen kann. Ohne Namen "Kasse ohne Namen".
+	 *
+	 * @param displayName der Anzeigename der Kasse ({@code CashRegisters.displayName})
+	 */
+	public static String cashRegister(String displayName) {
+		return (displayName == null || displayName.isBlank()) ? named("Kasse", null) : "Kasse \"" + displayName + "\"";
 	}
 
 	/** "<Art> <Name>", ohne Namen "<Art> ohne Namen". */

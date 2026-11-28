@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -23,6 +24,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
@@ -33,6 +35,7 @@ import org.junit.jupiter.api.io.TempDir;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.CashRegisters;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -53,6 +56,7 @@ import de.eltviller_carneval_verein.karten.store.TestSyncServices;
 import de.eltviller_carneval_verein.karten.store.UnitKey;
 import de.eltviller_carneval_verein.karten.store.UnitState;
 import de.eltviller_carneval_verein.karten.store.UnitState.Status;
+import de.eltviller_carneval_verein.karten.store.UnitType;
 import de.eltviller_carneval_verein.karten.store.Version;
 import de.eltviller_carneval_verein.karten.store.VersionId;
 import de.eltviller_carneval_verein.karten.store.VersionStore;
@@ -217,6 +221,115 @@ class StoreEventRepositoryTest {
 		assertEquals("Becker", bookingOf(copy, 1, "Becker").getLastName());
 		assertTrue(fresh.getAndClearLoadWarnings().isEmpty());
 	}
+
+	// Kassen -->
+
+	/**
+	 * Ein Event mit den Vorstellungen "Freitag" und "Samstag" und allen drei Arten von Kassen: gezählte Kasse von
+	 * "Freitag", eine freie Kasse und die gemeinsame Kasse.
+	 */
+	private static Event eventWithCashRegisters() {
+		Event event = named("Prunksitzung");
+		Presentation friday = event.addPresentation("Freitag");
+		event.addPresentation("Samstag");
+		CashRegisters.setActualCash(event, friday, 12_345);
+		CashRegisters.addFree(event).setActualCashAmount(2_000);
+		CashRegisters.selectShared(event, true);
+		return event;
+	}
+
+	private static Presentation presentationNamed(Event event, String name) {
+		return event.getPresentations().stream().filter(p -> name.equals(p.getName())).findFirst().orElseThrow();
+	}
+
+	private static List<UnitKey> cashRegisterUnits(SyncService sync, Event event) throws IOException {
+		return sync.eventUnits(event.getId()).stream().filter(unit -> unit.type() == UnitType.CASH_REGISTER).toList();
+	}
+
+	@Test
+	void unchangedEventWithCashRegistersWritesNothing(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		Event event = eventWithCashRegisters();
+		TestRepositories.events(sync).saveEvent(event);
+		assertEquals(3, cashRegisterUnits(sync, event).size());
+		assertFalse(sync.unitState(UnitKey.event(event.getId())).head().payload().has("cashRegisters"));
+
+		StoreEventRepository fresh = TestRepositories.events(started(appData));
+		Event loaded = fresh.loadEvents().get(0);
+		assertTrue(fresh.getAndClearLoadWarnings().isEmpty());
+		assertEquals(3, loaded.getCashRegisters().size());
+		assertEquals(12_345, loaded.findCashRegister(presentationNamed(loaded, "Freitag").getId()).getActualCashAmount());
+		assertEquals(Set.of(), fresh.locallyChangedUnits());
+		long before = filesIn(appData);
+
+		fresh.saveEvent(loaded);
+
+		assertEquals(before, filesIn(appData));
+	}
+
+	@Test
+	void zeroedPresentationRegisterIsChangedNotDeleted(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = eventWithCashRegisters();
+		repository.saveEvent(event);
+		Presentation friday = presentationNamed(event, "Freitag");
+		UnitKey register = UnitKey.cashRegister(event.getId(), friday.getId());
+		Version first = sync.unitState(register).head();
+
+		CashRegisters.setActualCash(event, friday, 0);
+		assertEquals(Set.of(register), repository.locallyChangedUnits());
+		repository.saveEvent(event);
+
+		UnitState state = sync.unitState(register);
+		assertNotEquals(first.id(), state.head().id(), "eine neue Version");
+		assertFalse(state.current().deleted(), "keine Löschung");
+		assertEquals(0, state.current().payload().get("actualCashAmount").asInt());
+		assertEquals(Set.of(), repository.locallyChangedUnits());
+	}
+
+	@Test
+	void typedAndResetAmountIsNotLocallyChanged(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = named("Prunksitzung");
+		Presentation friday = event.addPresentation("Freitag");
+		repository.saveEvent(event);
+
+		CashRegisters.setActualCash(event, friday, 500);
+		assertEquals(Set.of(UnitKey.cashRegister(event.getId(), friday.getId())), repository.locallyChangedUnits());
+		CashRegisters.setActualCash(event, friday, 0);
+
+		assertNotNull(event.findCashRegister(friday.getId()), "das Objekt bleibt in der Liste");
+		assertEquals(Set.of(), repository.locallyChangedUnits());
+		long before = filesIn(appData);
+		repository.saveEvent(event);
+		assertEquals(before, filesIn(appData));
+		assertEquals(List.of(), cashRegisterUnits(sync, event));
+	}
+
+	@Test
+	void renamingPresentationWritesNoCashRegister(@TempDir Path appData) throws IOException {
+		SyncService sync = started(appData);
+		StoreEventRepository repository = TestRepositories.events(sync);
+		Event event = named("Prunksitzung");
+		Presentation friday = event.addPresentation("Freitag");
+		Presentation saturday = event.addPresentation("Samstag");
+		CashRegisters.setActualCash(event, friday, 12_345);
+		repository.saveEvent(event);
+		UnitKey counted = UnitKey.cashRegister(event.getId(), friday.getId());
+		int versions = sync.unitState(counted).chain().size();
+
+		friday.setName("Freitagabend");
+		saturday.setName("Samstagabend");
+		repository.saveEvent(event);
+
+		assertEquals(versions, sync.unitState(counted).chain().size(), "die gezählte Kasse bekommt keine Version");
+		assertEquals(List.of(counted), cashRegisterUnits(sync, event), "für Samstag entsteht keine Kasse");
+		assertEquals("Kasse Freitagabend", CashRegisters.displayName(event, event.findCashRegister(friday.getId())));
+	}
+
+	// <-- Kassen
 
 	@Test
 	void loadEventsReturnsSameReferences(@TempDir Path appData) {

@@ -269,6 +269,10 @@ final class SyncNotifier {
 		deliver(l -> l.lost(loss.unit(), List.copyOf(loss.mine()), loss.winner()));
 	}
 
+	void fullSyncCompleted() {
+		deliver(SyncListener::fullSyncCompleted);
+	}
+
 	void duplicateMachine(String message) {
 		LOGGER.warning(message);
 		deliver(l -> l.duplicateMachine(message));

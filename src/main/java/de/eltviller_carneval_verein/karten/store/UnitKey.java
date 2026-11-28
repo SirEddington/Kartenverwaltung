@@ -13,6 +13,8 @@ import java.util.regex.Pattern;
  * <li>Auftritt: {@code events/<eventId>/presentations/<presentationId>}</li>
  * <li>Buchung auf einem Sitz: {@code events/<eventId>/presentations/<presentationId>/bookings/<seatId>}</li>
  * <li>Buchung ohne Sitz: {@code events/<eventId>/presentations/<presentationId>/bookings/_<bookingId>}</li>
+ * <li>Kasse: {@code events/<eventId>/cashRegisters/<cashRegisterId>}; die Kennung ist wie eine ID oder ein
+ * {@code _} davor</li>
  * <li>Halle: {@code halls/<hallId>}</li>
  * </ul>
  * IDs bestehen nur aus {@code [A-Za-z0-9-]} und sind 1 bis 64 Zeichen lang. Damit sind sie auf jedem
@@ -27,8 +29,10 @@ import java.util.regex.Pattern;
  * @param presentationId ID des Auftritts (nur bei Auftritten und Buchungen)
  * @param bookingDir     Ordnername der Buchung: Sitz-ID oder {@code _<bookingId>} (nur bei Buchungen)
  * @param hallId         ID der Halle (nur bei Hallen)
+ * @param cashRegisterId Kennung der Kasse: eine ID oder {@code _} plus eine ID (nur bei Kassen)
  */
-public record UnitKey(UnitType type, String eventId, String presentationId, String bookingDir, String hallId) {
+public record UnitKey(UnitType type, String eventId, String presentationId, String bookingDir, String hallId,
+		String cashRegisterId) {
 
 	private static final Pattern ID = Pattern.compile("[A-Za-z0-9-]{1,64}");
 
@@ -36,6 +40,7 @@ public record UnitKey(UnitType type, String eventId, String presentationId, Stri
 	private static final String PRESENTATIONS = "presentations";
 	private static final String BOOKINGS = "bookings";
 	private static final String HALLS = "halls";
+	private static final String CASH_REGISTERS = "cashRegisters";
 
 	/** Präfix des Ordnernamens einer Buchung ohne Sitz. */
 	private static final String UNASSIGNED_PREFIX = "_";
@@ -56,8 +61,16 @@ public record UnitKey(UnitType type, String eventId, String presentationId, Stri
 		require("eventId", eventId, needsEvent);
 		require("presentationId", presentationId, needsPresentation);
 		require("hallId", hallId, needsHall);
+		boolean needsCashRegister = type == UnitType.CASH_REGISTER;
+		if (needsCashRegister) {
+			if (cashRegisterId == null || !isValidPrefixedId(cashRegisterId)) {
+				throw new IllegalArgumentException("Ungültige Kassenkennung: " + cashRegisterId);
+			}
+		} else if (cashRegisterId != null) {
+			throw new IllegalArgumentException("Die Kassenkennung passt nicht zur Art " + type + ".");
+		}
 		if (needsBooking) {
-			if (bookingDir == null || !isValidBookingDir(bookingDir)) {
+			if (bookingDir == null || !isValidPrefixedId(bookingDir)) {
 				throw new IllegalArgumentException("Ungültiger Buchungsordner: " + bookingDir);
 			}
 		} else if (bookingDir != null) {
@@ -83,35 +96,41 @@ public record UnitKey(UnitType type, String eventId, String presentationId, Stri
 		return value != null && ID.matcher(value).matches();
 	}
 
-	private static boolean isValidBookingDir(String dir) {
-		return isValidId(dir.startsWith(UNASSIGNED_PREFIX) ? dir.substring(UNASSIGNED_PREFIX.length()) : dir);
+	/** Ob der Name eine ID ist, mit oder ohne einen führenden Unterstrich. */
+	private static boolean isValidPrefixedId(String name) {
+		return isValidId(name.startsWith(UNASSIGNED_PREFIX) ? name.substring(UNASSIGNED_PREFIX.length()) : name);
 	}
 
 	/** Schlüssel eines Events. */
 	public static UnitKey event(String eventId) {
-		return new UnitKey(UnitType.EVENT, eventId, null, null, null);
+		return new UnitKey(UnitType.EVENT, eventId, null, null, null, null);
 	}
 
 	/** Schlüssel eines Auftritts. */
 	public static UnitKey presentation(String eventId, String presentationId) {
-		return new UnitKey(UnitType.PRESENTATION, eventId, presentationId, null, null);
+		return new UnitKey(UnitType.PRESENTATION, eventId, presentationId, null, null, null);
 	}
 
 	/** Schlüssel einer Buchung auf einem Sitz; der Ordner heißt wie die Sitz-ID. */
 	public static UnitKey booking(String eventId, String presentationId, String seatId) {
 		checkId("seatId", seatId);
-		return new UnitKey(UnitType.BOOKING, eventId, presentationId, seatId, null);
+		return new UnitKey(UnitType.BOOKING, eventId, presentationId, seatId, null, null);
 	}
 
 	/** Schlüssel einer Buchung ohne Sitz; der Ordner heißt {@code _<bookingId>}. */
 	public static UnitKey unassignedBooking(String eventId, String presentationId, String bookingId) {
 		checkId("bookingId", bookingId);
-		return new UnitKey(UnitType.BOOKING, eventId, presentationId, UNASSIGNED_PREFIX + bookingId, null);
+		return new UnitKey(UnitType.BOOKING, eventId, presentationId, UNASSIGNED_PREFIX + bookingId, null, null);
 	}
 
 	/** Schlüssel einer Halle. */
 	public static UnitKey hall(String hallId) {
-		return new UnitKey(UnitType.HALL, null, null, null, hallId);
+		return new UnitKey(UnitType.HALL, null, null, null, hallId, null);
+	}
+
+	/** Schlüssel einer Kasse; die Kennung ist eine ID oder {@code _} plus eine ID. */
+	public static UnitKey cashRegister(String eventId, String cashRegisterId) {
+		return new UnitKey(UnitType.CASH_REGISTER, eventId, null, null, null, cashRegisterId);
 	}
 
 	/** Die ID der Halle bzw. des Events, zu dem die Einheit gehört. */
@@ -129,10 +148,13 @@ public record UnitKey(UnitType type, String eventId, String presentationId, Stri
 		return isUnassigned() ? bookingDir.substring(UNASSIGNED_PREFIX.length()) : null;
 	}
 
-	/** Die Eltern-Einheit: bei einer Buchung ihre Vorstellung, bei einer Vorstellung das Event; sonst {@code null}. */
+	/**
+	 * Die Eltern-Einheit: bei einer Buchung ihre Vorstellung, bei einer Vorstellung oder Kasse das Event; sonst
+	 * {@code null}.
+	 */
 	public UnitKey parent() {
 		return switch (type) {
-		case PRESENTATION -> event(eventId);
+		case PRESENTATION, CASH_REGISTER -> event(eventId);
 		case BOOKING -> presentation(eventId, presentationId);
 		case EVENT, HALL -> null;
 		};
@@ -158,12 +180,13 @@ public record UnitKey(UnitType type, String eventId, String presentationId, Stri
 		case BOOKING -> EVENTS + "/" + eventId + "/" + PRESENTATIONS + "/" + presentationId + "/" + BOOKINGS + "/"
 				+ bookingDir;
 		case HALL -> HALLS + "/" + hallId;
+		case CASH_REGISTER -> EVENTS + "/" + eventId + "/" + CASH_REGISTERS + "/" + cashRegisterId;
 		};
 	}
 
 	/**
 	 * Die Umkehrung von {@link #relativePath()}: erkennt aus einem relativen Ordnerpfad (mit {@code /}) die
-	 * Einheit. Alles, was nicht genau einem der fünf Muster entspricht (fremde Ordner, Unterordner, leere oder
+	 * Einheit. Alles, was nicht genau einem der sechs Muster entspricht (fremde Ordner, Unterordner, leere oder
 	 * unzulässige Namen), ergibt {@link Optional#empty()}.
 	 */
 	public static Optional<UnitKey> parse(String relativePath) {
@@ -180,6 +203,9 @@ public record UnitKey(UnitType type, String eventId, String presentationId, Stri
 			}
 			if (parts.length == 4 && parts[0].equals(EVENTS) && parts[2].equals(PRESENTATIONS)) {
 				return Optional.of(presentation(parts[1], parts[3]));
+			}
+			if (parts.length == 4 && parts[0].equals(EVENTS) && parts[2].equals(CASH_REGISTERS)) {
+				return Optional.of(cashRegister(parts[1], parts[3]));
 			}
 			if (parts.length == 6 && parts[0].equals(EVENTS) && parts[2].equals(PRESENTATIONS)
 					&& parts[4].equals(BOOKINGS)) {

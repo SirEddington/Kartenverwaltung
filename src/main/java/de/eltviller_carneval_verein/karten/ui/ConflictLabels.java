@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.function.Function;
 
 import de.eltviller_carneval_verein.karten.model.Booking;
+import de.eltviller_carneval_verein.karten.model.CashRegister;
+import de.eltviller_carneval_verein.karten.model.CashRegisters;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Hall;
 import de.eltviller_carneval_verein.karten.model.Presentation;
@@ -23,8 +25,8 @@ import de.eltviller_carneval_verein.karten.validation.EntityLabels;
 /**
  * Die Anzeigenamen der Einheiten für den Sammel-Dialog ({@link ConflictList}), ohne JavaFX: ein Event heißt wie das Event,
  * eine Vorstellung "Event › Vorstellung", eine Buchung "Event › Vorstellung › Platz" bzw. bei einer Buchung ohne Platz
- * (Einheit {@code _<ID>}) "… › Kunde", eine Halle wie die Halle. Fehlt die Buchung, heißt sie nach ihrem Sitz in der
- * Bestuhlung (KARV-111). Dieselben Bezeichnungen setzt die Oberfläche des gemeinsamen Ordners in ihre Meldungen ein.
+ * (Einheit {@code _<ID>}) "… › Kunde", eine Kasse "Event › Anzeigename der Kasse", eine Halle wie die Halle. Fehlt die
+ * Buchung, heißt sie nach ihrem Sitz in der Bestuhlung (KARV-111). Dieselben Bezeichnungen setzt die Oberfläche des gemeinsamen Ordners in ihre Meldungen ein.
  */
 public final class ConflictLabels {
 
@@ -75,6 +77,10 @@ public final class ConflictLabels {
 			if (eventName == null || unit.type() == UnitType.EVENT) {
 				return eventName;
 			}
+			if (unit.type() == UnitType.CASH_REGISTER) {
+				// eine Kasse hängt am Event, nicht an einer Vorstellung
+				return eventName + SEPARATOR + cashRegisterName(event, unit, modelObject.apply(unit), formerName);
+			}
 			Presentation presentation = event == null ? null : event.findPresentation(unit.presentationId());
 			String presentationName = presentation != null ? EntityLabels.nameOrPlaceholder(presentation.getName())
 					: formerName.apply(UnitKey.presentation(unit.eventId(), unit.presentationId()));
@@ -94,6 +100,22 @@ public final class ConflictLabels {
 			}
 			return path + SEPARATOR + bookingPart(model, unit.isUnassigned());
 		};
+	}
+
+	/**
+	 * Der Anzeigename einer Kasse ({@link CashRegisters#displayName}). Fehlt sie im Modell, heißt sie wie in ihrer letzten
+	 * Version mit Namen, sonst nach ihrem Vorgabenamen ("Gemeinsame Kasse", "Kasse Freitag", "Kasse ohne Vorstellung").
+	 */
+	private static String cashRegisterName(Event event, UnitKey unit, Object model, Function<UnitKey, String> formerName) {
+		if (event != null && model instanceof CashRegister register) {
+			return CashRegisters.displayName(event, register);
+		}
+		String former = formerName.apply(unit);
+		if (former != null) {
+			return former;
+		}
+		Event owner = event != null ? event : new Event(unit.eventId());
+		return CashRegisters.displayName(owner, unit.cashRegisterId());
 	}
 
 	/**

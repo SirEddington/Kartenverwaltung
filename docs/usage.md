@@ -70,6 +70,25 @@ disappeared are kept as **"Ohne Platz"** (unassigned).
 4. **"Archiviert"** removes an event from the sales selection; accounting shows it only with "Archivierte
    einschließen".
 5. **"Wiederherstellen"** in the overview opens the restore dialog (see below).
+6. **Cash registers** (section **"Kassen"** below the event and presentation tables, for the selected event). By
+   default every presentation has its own cash register, named "Kasse <presentation>"; nothing has to be set up. Options:
+   - **"eine gemeinsame Kasse"** creates one register for all presentations. Switching back to "je Vorstellung eine
+     Kasse" removes it; with a counted amount or a comment it stays ("Die gemeinsame Kasse hat einen Ist-Betrag oder
+     Kommentar und bleibt bestehen.").
+   - **"+ Kasse hinzufügen"** adds a free register ("Neue Kasse") for all presentations or a selection of them.
+   - In edit mode the **name** can be changed (an empty name restores the default) and, for free registers, **"gilt
+     für"**. A free register is deleted from the context menu of its row, after a confirmation; one with a counted
+     amount or a comment cannot be deleted.
+   - A register whose presentation was deleted stays in the list as "– (Vorstellung gelöscht)" as long as it holds an
+     amount or a comment; "– (Vorstellung nicht verfügbar)" means the presentation is only missing because it is locked
+     or unreadable.
+   - A register that is locked (SYS-008, SYS-009) is marked "(gesperrt)"; its name cannot be changed. While a shared
+     folder is still delivering the registers of an event after an update ("Die Kassen dieses Events werden noch
+     abgeglichen."), the section cannot be edited.
+   - "Als Vorlage verwenden" copies no registers.
+
+   An event with a saved register no longer opens on computers running version 1.1. Background:
+   [decisions.md](decisions.md#cash-registers-as-units-karv-144).
 
 ## Selling tickets (*Kartenverkauf*)
 
@@ -209,6 +228,16 @@ choice is kept for the next start of this workstation; with it off, every start 
 - **"Kassenabgleich"** per event/presentation: expected revenue by payment method, number of seats
   (paid / reserved / total), **"Tatsächlicher Kasseninhalt"** (counted cash), the difference to the expected cash
   amount and a comment for deviations.
+  - For a selected presentation the count belongs to its cash register. Entries are saved with the event like before.
+  - If the event has a shared register, the count is locked ("Für dieses Event gilt eine gemeinsame Kasse. Der
+    Kassensturz je Kasse folgt."), and amount and difference of the presentation show "–". A register counted before
+    the switch stays in the figures.
+  - A register that is locked or not yet reconciled cannot be counted; the note under the field says why.
+  - An older program version (1.1) may still have written a second amount into the old fields after the register was
+    first saved. The note "Zweiter Ist-Betrag aus einer älteren Programmversion: …" shows it, the register counts;
+    **"Verwerfen"** (edit mode) removes the second amount (check `KAS-005`).
+  - **"Gesamtbilanz"** (no presentation selected): the amount is the sum over all visible registers of the event and
+    cannot be edited there. CSV and PDF take amount and comment from the register.
 - **"Statistik"** aggregated per event over all events, independent of the header selection.
 - **"Exportieren"** writes the active view as **CSV** or **PDF**; the last used format is remembered.
 
@@ -228,6 +257,14 @@ effect with "Speichern".
 Every save is kept. In the event or hall overview, **"Wiederherstellen"** lists all events (or halls), including
 deleted ones; on the right are their save points grouped by day, with time, workstation, operator and number of
 changes. Restoring writes the selected state as a new save, so the restore itself can be undone the same way.
+
+**Cash registers stay as they are** (KARV-144): a restore resets presentations and bookings, not the counted amounts.
+The confirmation says so and lists the registers whose amount was counted since the chosen state ("Seit diesem Stand
+gezählt: …"); if the cash reconciliation then shows a difference, sales have to be entered again. The same list stands
+among the notes after the restore ("Kassen wurden nicht zurückgesetzt."). A presentation that the restore removes
+leaves its register behind, with its default name, if it holds an amount or a comment. A save that changed only cash
+registers does not appear as a save point. A restore is also rejected while the registers of the event are not yet
+reconciled.
 
 ## Working with several workstations
 
@@ -374,7 +411,8 @@ after saving. The prefix names the entity:
 | Prefix | Entity | Examples |
 |---|---|---|
 | `EVT-` | Event | `EVT-002` name empty (error), `EVT-001` duplicate presentation name |
-| `PRS-` | Presentation | `PRS-001` duplicate table number, `PRS-003` no hall, `PRS-006` no seating plan, `PRS-007` seating plan gone |
+| `PRS-` | Presentation | `PRS-001` duplicate table number, `PRS-003` no hall, `PRS-006` no seating plan, `PRS-007` seating plan gone (`PRS-005` is no longer issued) |
+| `KAS-` | Cash register | `KAS-001` name empty (error), `KAS-002` name used twice, `KAS-003` applies to no presentation, `KAS-004` counted amount out of range (error), `KAS-005` second amount from an older version |
 | `HLL-` | Hall | `HLL-001` name empty, `HLL-002` size out of range, `HLL-003` objects overlap |
 | `HOB-` | Hall object | `HOB-001` name empty, `HOB-003` text size, `HOB-005` outside the hall |
 | `SPL-` | Seating plan | `SPL-001` name empty, `SPL-002` duplicate table, `SPL-004`/`SPL-005` overlaps |

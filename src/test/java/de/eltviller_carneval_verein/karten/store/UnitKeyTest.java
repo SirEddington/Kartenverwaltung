@@ -101,8 +101,34 @@ class UnitKeyTest {
 
 	@Test
 	void recordRejectsInconsistentComponents() {
-		assertThrows(IllegalArgumentException.class, () -> new UnitKey(UnitType.EVENT, "e1", "p1", null, null));
-		assertThrows(IllegalArgumentException.class, () -> new UnitKey(UnitType.HALL, null, null, null, null));
-		assertThrows(IllegalArgumentException.class, () -> new UnitKey(null, "e1", null, null, null));
+		assertThrows(IllegalArgumentException.class, () -> new UnitKey(UnitType.EVENT, "e1", "p1", null, null, null));
+		assertThrows(IllegalArgumentException.class, () -> new UnitKey(UnitType.HALL, null, null, null, null, null));
+		assertThrows(IllegalArgumentException.class, () -> new UnitKey(null, "e1", null, null, null, null));
+	}
+
+	@Test
+	void cashRegisterKeyHasPathAndParent() {
+		UnitKey key = UnitKey.cashRegister("e1", "_event");
+
+		assertEquals("events/e1/cashRegisters/_event", key.relativePath());
+		assertEquals(UnitKey.event("e1"), key.parent());
+		assertFalse(key.type().hasChildren());
+		assertEquals("e1", key.ownerId());
+	}
+
+	@Test
+	void parseIsInverseForCashRegisters() {
+		for (String id : new String[] { "p-1", "_event", "_" + java.util.UUID.randomUUID() }) {
+			UnitKey key = UnitKey.cashRegister("e1", id);
+			assertEquals(Optional.of(key), UnitKey.parse(key.relativePath()), id);
+		}
+	}
+
+	@Test
+	void parseRejectsInvalidCashRegisterNames() {
+		for (String path : new String[] { "events/e1/cashRegisters/__x", "events/e1/cashRegisters/a/b",
+				"events/e1/cashRegisters/" }) {
+			assertEquals(Optional.empty(), UnitKey.parse(path), path);
+		}
 	}
 }

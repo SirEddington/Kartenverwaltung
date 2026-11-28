@@ -1,5 +1,7 @@
 package de.eltviller_carneval_verein.karten.validation;
 
+import de.eltviller_carneval_verein.karten.model.CashRegisters;
+import de.eltviller_carneval_verein.karten.model.CashRegisters.VisibleCashRegister;
 import de.eltviller_carneval_verein.karten.model.Event;
 import de.eltviller_carneval_verein.karten.model.Presentation;
 
@@ -25,7 +27,20 @@ public final class EventValidator {
 		validateName();
 		validatePresentationNamesAreUnique();
 		validatePresentations();
+		validateCashRegisterNamesAreUnique();
+		result.addAll(CashRegisterValidator.validate(event));
 		return result;
+	}
+
+	/**
+	 * Vergleich unter Geschwistern: eine Meldung je mehrfach vorkommendem Kassennamen unter den sichtbaren, nicht
+	 * verwaisten Kassen (Schreibweise wie bei den Vorstellungen).
+	 */
+	private void validateCashRegisterNamesAreUnique() {
+		for (String name : DuplicateNames
+				.of(CashRegisters.visible(event).stream().filter(line -> !line.orphan()).map(VisibleCashRegister::displayName))) {
+			result.add(CashRegisterIssue.NAME_DUPLICATE.toIssue(name));
+		}
 	}
 
 	/** Der Eventname darf nicht leer sein (auch nicht nur Leerzeichen): Er gibt dem Event seine Anzeige und Datei-Zuordnung. */

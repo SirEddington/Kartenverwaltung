@@ -22,7 +22,7 @@ import de.eltviller_carneval_verein.karten.validation.Severity;
 /**
  * Verteilt die Rückmeldungen des Versionsspeichers in der Oberfläche (Spec "Popups und Fußzeilentexte"), ohne JavaFX. Was
  * {@code LiveUpdates} schon behandelt ({@code unitsChanged}, {@code conflictsChanged}, {@code error}, {@code lost},
- * {@code pending}), geht unverändert an dessen Listener; der Rest geht an {@link Ui}:
+ * {@code pending}, {@code fullSyncCompleted}), geht unverändert an dessen Listener; der Rest geht an {@link Ui}:
  * <ul>
  * <li>{@code unreachable}: Popup, solange kein solches offen ist und kein Ablauf des Verbindens läuft (dessen Ladeansicht
  * zeigt den Hinweis);
@@ -188,6 +188,11 @@ public final class SharedFolderEvents implements SyncListener {
 	@Override
 	public void lost(UnitKey unit, List<VersionId> mine, VersionId winner) {
 		live.lost(unit, mine, winner);
+	}
+
+	@Override
+	public void fullSyncCompleted() {
+		live.fullSyncCompleted();
 	}
 
 	@Override

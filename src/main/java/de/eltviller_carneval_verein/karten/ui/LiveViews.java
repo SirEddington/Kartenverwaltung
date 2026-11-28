@@ -124,9 +124,9 @@ public final class LiveViews {
 	}
 
 	/**
-	 * Ob unter {@code units} eine zum gezeigten Event und zur gezeigten Vorstellung gehört: ihr Kopf (Namen, Preise), die
-	 * Vorstellung selbst oder eine ihrer Buchungen. Ohne Vorstellung ({@code null}: alle) zählt das ganze Event, ohne Event
-	 * nichts.
+	 * Ob unter {@code units} eine zum gezeigten Event und zur gezeigten Vorstellung gehört: ihr Kopf (Namen, Preise), jede
+	 * Kasse des Events (eine gemeinsame oder freie Kasse kann für jede Vorstellung gelten), die Vorstellung selbst oder eine
+	 * ihrer Buchungen. Ohne Vorstellung ({@code null}: alle) zählt das ganze Event, ohne Event nichts.
 	 */
 	public static boolean touches(Set<UnitKey> units, Event event, Presentation presentation) {
 		if (event == null) {
@@ -136,7 +136,8 @@ public final class LiveViews {
 			if (!event.getId().equals(unit.eventId())) {
 				continue;
 			}
-			if (presentation == null || unit.type() == UnitType.EVENT || presentation.getId().equals(unit.presentationId())) {
+			if (presentation == null || unit.type() == UnitType.EVENT || unit.type() == UnitType.CASH_REGISTER
+					|| presentation.getId().equals(unit.presentationId())) {
 				return true;
 			}
 		}

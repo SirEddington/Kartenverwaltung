@@ -16,7 +16,10 @@ public enum UnitType {
 	BOOKING,
 
 	/** Eine Halle samt Sitzplan. */
-	HALL;
+	HALL,
+
+	/** Eine Kasse eines Events (Vorstellungskasse, gemeinsame oder freie Kasse). */
+	CASH_REGISTER;
 
 	/** Ob Einheiten dieser Art Einheiten unter sich haben: ein Event (Vorstellungen) und eine Vorstellung (Buchungen). */
 	public boolean hasChildren() {

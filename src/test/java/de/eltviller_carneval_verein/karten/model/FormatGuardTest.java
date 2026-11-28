@@ -45,8 +45,8 @@ public class FormatGuardTest {
 	public static final String RULES = "docs/decisions.md, Abschnitt \"Forward-compatible data format\"";
 
 	/** Die gespeicherten Klassen, die der Lauf ab {@link Hall} und {@link Event} finden muss. */
-	private static final Set<Class<?>> NINE = Set.of(Hall.class, HallObject.class, SeatingPlan.class, TableRow.class, Table.class, Seat.class,
-			Event.class, Presentation.class, Booking.class);
+	private static final Set<Class<?>> STORED = Set.of(Hall.class, HallObject.class, SeatingPlan.class, TableRow.class, Table.class, Seat.class,
+			Event.class, Presentation.class, Booking.class, CashRegister.class);
 
 	/** Je gespeichertem Enum die Werte seit 1.0. Neue Werte dürfen dazukommen (und kommen dann hierher), keiner darf fehlen. */
 	private static final Map<Class<?>, List<String>> VALUES_SINCE_1_0 = Map.of(
@@ -185,7 +185,7 @@ public class FormatGuardTest {
 	@Test
 	void everyStoredClassFollowsTheRules() throws Exception {
 		Set<Class<?>> stored = storedClasses(mapper);
-		assertEquals(names(NINE), names(stored), rules("Die gespeicherten Klassen haben sich geändert"));
+		assertEquals(names(STORED), names(stored), rules("Die gespeicherten Klassen haben sich geändert"));
 
 		for (Class<?> type : stored) {
 			JavaType javaType = mapper.constructType(type);
@@ -232,7 +232,7 @@ public class FormatGuardTest {
 
 	@Test
 	void rulesIdMatchesTheStrictEnum() {
-		assertEquals("gate-1;payment=CARD,CASH,NONE,TRANSFER;requires=", ContentRules.GATE.rulesId(), RULES);
+		assertEquals("gate-1;payment=CARD,CASH,NONE,TRANSFER;requires=cashRegisters", ContentRules.GATE.rulesId(), RULES);
 	}
 
 	private static Set<String> names(Set<Class<?>> types) {

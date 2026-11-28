@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -73,9 +74,20 @@ class CopyFromTest {
 		target.setArchived(false);
 		Presentation own = target.addPresentation("Eigene");
 
+		CashRegister ownRegister = new CashRegister("_event");
+		ownRegister.setName("Eigene Kasse");
+		target.putCashRegister(ownRegister);
+		source.putCashRegister(new CashRegister("_fremd"));
+
 		target.copyFrom(source);
 
-		assertEquals(treeWithout(source, "presentations"), treeWithout(target, "presentations"));
+		ObjectNode expected = treeWithout(source, "presentations");
+		expected.remove("cashRegisters");
+		ObjectNode actual = treeWithout(target, "presentations");
+		actual.remove("cashRegisters");
+		assertEquals(expected, actual);
+		assertEquals(1, target.getCashRegisters().size());
+		assertSame(ownRegister, target.getCashRegisters().get(0));
 		assertEquals(List.of(own), target.getPresentations());
 		assertSame(own, target.getPresentations().get(0));
 		assertSame(target, own.getParent());
@@ -120,6 +132,28 @@ class CopyFromTest {
 		assertEquals("Eigen", own.getLastName());
 		assertSame(event, target.getParent());
 		assertTrue(target.isPlanMissing());
+	}
+
+	@Test
+	void cashRegisterCopyFromCopiesEveryStoredField() {
+		CashRegister source = new CashRegister("_fremd");
+		source.setName("Fremde Kasse");
+		source.setAllPresentations(true);
+		source.setPresentationIds(new ArrayList<>(List.of("p1", "p2")));
+		source.setActualCashAmount(125000);
+		source.setCashDifferenceComment("Wechselgeld");
+
+		CashRegister target = new CashRegister("_eigen");
+		target.setName("Alt");
+		target.setPresentationIds(new ArrayList<>(List.of("p9")));
+		target.setActualCashAmount(1);
+
+		target.copyFrom(source);
+
+		assertEquals("_eigen", target.getId());
+		ObjectNode expected = tree(source);
+		expected.put("id", "_eigen");
+		assertEquals(expected, tree(target));
 	}
 
 	@Test

@@ -1,5 +1,6 @@
 package de.eltviller_carneval_verein.karten.ui.backup;
 
+import java.io.IOException;
 import java.util.List;
 
 import de.eltviller_carneval_verein.karten.repository.SavePoint;
@@ -59,4 +60,15 @@ public interface BackupCatalog {
 
 	/** Was das Zurücksetzen außer der gewählten Entität noch mitnimmt; Teil der Rückfrage. */
 	String restoreWarning();
+
+	/**
+	 * Zeilen, die die Rückfrage unter {@link #restoreWarning} zeigt und die nach dem Wiederherstellen unter den Hinweisen
+	 * stehen; leer, wenn es nichts zu nennen gibt. Liest den Versionsspeicher und gehört deshalb auf einen
+	 * Hintergrund-Thread.
+	 *
+	 * @throws IOException wenn der Versionsspeicher nicht lesbar ist
+	 */
+	default List<String> restoreDetails(Entry entry, SavePoint point) throws IOException {
+		return List.of();
+	}
 }

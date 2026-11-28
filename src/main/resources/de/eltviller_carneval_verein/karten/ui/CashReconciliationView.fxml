@@ -52,7 +52,12 @@
         <Label text="€" />
     </HBox>
 
-    <Label fx:id="lblIstHint" text="" style="-fx-font-style: italic; -fx-text-fill: #666666;" />
+    <Label fx:id="lblIstHint" text="" wrapText="true" style="-fx-font-style: italic; -fx-text-fill: #666666;" />
+
+    <HBox fx:id="secondAmountBox" spacing="10.0" alignment="CENTER_LEFT" visible="false" managed="false">
+        <Label fx:id="lblSecondAmount" text="" wrapText="true" />
+        <Button fx:id="btnDiscardSecondAmount" text="Verwerfen" onAction="#discardSecondAmount" />
+    </HBox>
 
     <HBox spacing="10.0" alignment="CENTER_LEFT">
         <Label text="Differenz zum Bar-Soll:" style="-fx-font-weight: bold;" />

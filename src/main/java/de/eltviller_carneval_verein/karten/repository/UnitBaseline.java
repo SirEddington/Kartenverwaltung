@@ -230,7 +230,7 @@ final class UnitBaseline {
 	 */
 	void save(String ownerId, String name, List<UnitPayload> units) {
 		List<Change> pending = UnitMapper.changes(baselineOf(ownerId), shownForSave(ownerId, units), units,
-				sync::snapshots, sync::eventSnapshots);
+				sync::snapshots, sync::eventSnapshots, sync::cashRegisterSnapshots);
 		if (!pending.isEmpty()) {
 			append(ownerId, pending, "Fehler beim Speichern von \"" + name + "\": ");
 		}

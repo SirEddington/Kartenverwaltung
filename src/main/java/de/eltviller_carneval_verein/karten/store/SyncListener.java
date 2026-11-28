@@ -75,6 +75,13 @@ public interface SyncListener {
 	default void skipped(UnitKey unit, boolean subtree, String cause) {
 	}
 
+	/**
+	 * Ein Vollabgleich ist bis zum Ende gelaufen, auch wenn er einzelne Einheiten übersprungen hat; kommt am Ende jedes
+	 * Laufs. Danach ist {@link SyncService#fullSyncCompletedSinceStart()} {@code true}.
+	 */
+	default void fullSyncCompleted() {
+	}
+
 	/** Dieser Rechner hat eine neue Kennung bekommen, weil ein anderer dieselbe verwendet ({@code SYS-011}). */
 	default void duplicateMachine(String message) {
 	}
