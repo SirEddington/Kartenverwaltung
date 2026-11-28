@@ -239,7 +239,8 @@ final class CashRegisterSection {
 
 	/**
 	 * Ändert den Namen der Kasse ({@link CashRegisters#setName}; leer: Vorgabename). Steht schon dieser Name da, ändert sich
-	 * nichts: Der Vorgabename wird so nicht zum eigenen Namen, und eine gedachte Vorstellungskasse entsteht nicht.
+	 * nichts: Der Vorgabename wird so nicht zum eigenen Namen, und eine gedachte Vorstellungskasse entsteht nicht. Der
+	 * eingetippte Vorgabename zählt wie ein leerer Name, sonst folgte er einer Umbenennung der Vorstellung nicht mehr.
 	 *
 	 * @return ob sich das Modell geändert hat
 	 */
@@ -253,6 +254,9 @@ final class CashRegisterSection {
 		// Eine freie Kasse hat keinen Vorgabenamen: Sie wird mit ihrem gespeicherten Namen verglichen, sonst bliebe ein
 		// gelöschter Name bei der Eingabe des Platzhalters ohne Namen.
 		boolean free = register != null && register.kind() == CashRegister.Kind.FREE;
+		if (!free && wanted.equals(CashRegisters.defaultName(event, id))) {
+			wanted = "";
+		}
 		boolean unchanged = wanted.isEmpty() ? register == null || isBlank(register.getName())
 				: wanted.equals(free ? register.getName() : displayName(event, id));
 		if (unchanged) {

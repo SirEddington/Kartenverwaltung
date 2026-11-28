@@ -240,6 +240,16 @@ class CashRegisterSectionTest {
 	}
 
 	@Test
+	void typedDefaultNameRestoresDefault() {
+		assertTrue(CashRegisterSection.rename(event, first.getId(), "Abendkasse"));
+
+		assertTrue(CashRegisterSection.rename(event, first.getId(), " Kasse 1. Sitzung "));
+		assertNull(event.findCashRegister(first.getId()).getName());
+		first.setName("Prunksitzung");
+		assertEquals("Kasse Prunksitzung", CashRegisterSection.displayName(event, first.getId()));
+	}
+
+	@Test
 	void renameFreeRegisterComparesStoredName() {
 		CashRegister free = CashRegisters.addFree(event);
 		assertTrue(CashRegisterSection.rename(event, free.getId(), ""));

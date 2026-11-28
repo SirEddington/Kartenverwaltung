@@ -49,6 +49,8 @@ public final class BackupRestoreDialog {
 	private static final DateTimeFormatter DAY_FORMAT = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 	private static final DateTimeFormatter CLOCK_FORMAT = DateTimeFormatter.ofPattern("HH:mm:ss");
 	static final String BUSY_TEXT = "Wird wiederhergestellt …";
+	/** Der Platzhalter, solange vor der Rückfrage die gezählten Kassen gelesen werden (KARV-144). */
+	static final String CHECK_TEXT = "Speicherstand wird geprüft …";
 	static final String CASH_NOT_RESET = "Kassen wurden nicht zurückgesetzt.";
 
 	private BackupRestoreDialog() {
@@ -121,7 +123,7 @@ public final class BackupRestoreDialog {
 
 		private final TreeView<Object> tree = new TreeView<>();
 		private final Label placeholder = new Label();
-		private final Label busyText = new Label(BUSY_TEXT);
+		private final Label busyText = new Label();
 
 		SavePointPane(ZoneId zone) {
 			tree.setShowRoot(false);
@@ -148,10 +150,12 @@ public final class BackupRestoreDialog {
 		}
 
 		/**
-		 * Zeigt, solange etwas wiederhergestellt wird, nur den Platzhalter {@value BackupRestoreDialog#BUSY_TEXT}. Die Liste
-		 * bleibt dabei unverändert (auch die Auswahl) und erscheint danach wieder.
+		 * Zeigt, solange etwas wiederhergestellt oder vorher geprüft wird, nur den Platzhalter {@code text}
+		 * ({@value BackupRestoreDialog#BUSY_TEXT} bzw. {@value BackupRestoreDialog#CHECK_TEXT}). Die Liste bleibt dabei
+		 * unverändert (auch die Auswahl) und erscheint danach wieder.
 		 */
-		void setBusy(boolean busy) {
+		void setBusy(boolean busy, String text) {
+			busyText.setText(text);
 			busyText.setVisible(busy);
 			tree.setVisible(!busy);
 			placeholder.setVisible(!busy && tree.getRoot() == null);
@@ -288,7 +292,7 @@ public final class BackupRestoreDialog {
 			if (entry == null || point == null) {
 				return;
 			}
-			setRestoring(true, restoring, entryList, savePoints, closeButton);
+			setBusy(true, CHECK_TEXT, restoring, entryList, savePoints, closeButton);
 			// Vor der Rückfrage im Hintergrund: die Zeilen zu den Kassen, unabhängig vom Plan des Wiederherstellens
 			Task<List<String>> details = new Task<>() {
 				@Override
@@ -332,7 +336,9 @@ public final class BackupRestoreDialog {
 			});
 			details.setOnFailed(read -> {
 				setRestoring(false, restoring, entryList, savePoints, closeButton);
-				MainApp.showAlert("Wiederherstellen fehlgeschlagen", messageOf(details.getException()), AlertType.ERROR);
+				// noch nicht bestätigt, also auch nichts versucht
+				MainApp.showAlert("Speicherstand nicht geprüft", "Der Speicherstand konnte nicht geprüft werden: "
+						+ messageOf(details.getException()), AlertType.ERROR);
 			});
 			startInBackground(details, "restore-details");
 		});
@@ -349,11 +355,17 @@ public final class BackupRestoreDialog {
 	/** Sperrt den Dialog, solange wiederhergestellt wird: beide Listen und beide Knöpfe, rechts der Platzhalter. */
 	private static void setRestoring(boolean restoring, BooleanProperty flag, ListView<Entry> entryList, SavePointPane pane,
 			Button closeButton) {
-		flag.set(restoring);
-		entryList.setDisable(restoring);
-		pane.setDisable(restoring);
-		closeButton.setDisable(restoring);
-		pane.setBusy(restoring);
+		setBusy(restoring, BUSY_TEXT, flag, entryList, pane, closeButton);
+	}
+
+	/** Sperrt den Dialog wie {@link #setRestoring} oder gibt ihn frei, mit dem Platzhalter {@code text}. */
+	private static void setBusy(boolean busy, String text, BooleanProperty flag, ListView<Entry> entryList, SavePointPane pane,
+			Button closeButton) {
+		flag.set(busy);
+		entryList.setDisable(busy);
+		pane.setDisable(busy);
+		closeButton.setDisable(busy);
+		pane.setBusy(busy, text);
 	}
 
 	/** Startet die Aufgabe auf einem eigenen Hintergrund-Thread. */
